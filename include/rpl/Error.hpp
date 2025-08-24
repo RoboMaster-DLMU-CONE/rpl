@@ -8,11 +8,19 @@ namespace rpl
 {
     enum class ErrorCode
     {
-        Again
+        Again,
+        InsufficientData,
+        NoFrameHeader,
+        InvalidFrameHeader,
+        CrcMismatch,
+        BufferOverflow,
     };
+
     struct Error
     {
-        Error(const ErrorCode c, std::string msg): message(std::move(msg)), code(c){}
+        Error(const ErrorCode c, std::string msg) : message(std::move(msg)), code(c)
+        {
+        }
 
         std::string message;
         ErrorCode code;
