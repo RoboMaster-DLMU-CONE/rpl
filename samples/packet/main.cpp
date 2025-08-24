@@ -33,7 +33,7 @@ int main()
     std::cout << "=== RPL Packet Serialization/Deserialization Demo ===" << std::endl;
 
     // 创建一个示例数据包
-    SamplePacket original_packet(1.5f, 2.3f, 0.8f, 45.0f, 10.1f, 20.2f, 30.3f);
+    SamplePacket original_packet{1.5f, 2.3f, 0.8f, 45.0f, 10.1f, 20.2f, 30.3f};
     original_packet.set_sequence_number(42);
 
     std::cout << "\n1. Original packet:" << std::endl;
