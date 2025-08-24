@@ -16,7 +16,6 @@
 
 namespace rpl
 {
-    // 新的帧格式常量
     static constexpr uint8_t FRAME_START_BYTE = 0xA5;
     static constexpr size_t FRAME_HEADER_SIZE = 5; // 1字节起始 + 2字节长度 + 1字节序号 + 1字节CRC8
     static constexpr size_t FRAME_TAIL_SIZE = 2; // 2字节CRC16
@@ -78,9 +77,27 @@ namespace rpl
         }
 
     private:
-        jnk0le::Ringbuffer<uint8_t, 512> ringbuffer;
+        static consteval size_t caculate_buffer_size()
+        {
+            constexpr size_t frame_size = T{}.frame_size();
+            // 至少要能容纳 2 个完整帧，以处理分包情况
+            constexpr size_t min_size = frame_size * 2;
+            // 向上取整到最近的 2 的幂
+            if constexpr (std::has_single_bit(min_size))
+            {
+                return min_size;
+            }
+            else
+            {
+                return std::bit_ceil(min_size);
+            }
+        }
+
+        static constexpr size_t buffer_size = caculate_buffer_size();
         static constexpr size_t expected_data_size = T{}.data_size();
         static constexpr size_t expected_frame_size = T{}.frame_size();
+        jnk0le::Ringbuffer<uint8_t, buffer_size> ringbuffer;
+
 
         tl::expected<T, Error> try_parse_packet()
         {
