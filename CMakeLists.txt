@@ -6,5 +6,7 @@ include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
 
+set(FRAME_HEADER_TAG "0xA5")
+
 add_subdirectory(src)
 add_subdirectory(samples)

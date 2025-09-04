@@ -14,11 +14,12 @@ namespace rpl
         InvalidFrameHeader,
         CrcMismatch,
         BufferOverflow,
+        InternalError,
     };
 
-    struct Error
+    struct error
     {
-        Error(const ErrorCode c, std::string msg) : message(std::move(msg)), code(c)
+        error(const ErrorCode c, std::string msg) : message(std::move(msg)), code(c)
         {
         }
 

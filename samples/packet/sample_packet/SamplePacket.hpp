@@ -2,7 +2,7 @@
 #define RPL_SAMPLEPACKET_HPP
 
 #include <cstring>
-#include <rpl/Packet.hpp>
+#include <RPL/Packet.hpp>
 
 class __attribute__((packed)) SamplePacket final : public rpl::Packet
 {
