@@ -1,14 +1,15 @@
 #ifndef RPL_MEMORYPOOL_HPP
 #define RPL_MEMORYPOOL_HPP
 
+#include <array>
+#include <cstddef>
+
 namespace RPL::Containers
 {
-    template <typename Deserializer>
+    template <typename Collector>
     struct MemoryPool
     {
-        using Collector = Deserializer::Collector;
-
-        static constinit std::array<std::byte, Collector::totalSize> buffer{};
+        static inline std::array<std::byte, Collector::totalSize> buffer{};
     };
 }
 

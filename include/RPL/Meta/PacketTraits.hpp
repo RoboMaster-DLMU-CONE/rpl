@@ -6,18 +6,17 @@ namespace RPL::Meta
     template <typename Derived>
     struct PacketTraitsBase
     {
-        static constexpr std::uint16_t cmd = Derived::cmd;
-        static constexpr std::size_t size = Derived::size;
+        static constexpr uint16_t cmd = Derived::cmd;
+        static constexpr size_t size = Derived::size;
 
-        static_assert(requires { Derived::cmd; }, "Derived class must define cmd");
-        static_assert(requires { Derived::size; }, "Derived class must define size");
-
-        static void before_get(std::uint8_t* data)
+        static void before_get(uint8_t* data)
         {
-            if constexpr (requires { Derived::before_get(data); })
+            // 使用不同的方法名避免递归
+            if constexpr (requires { Derived::before_get_custom(data); })
             {
-                Derived::before_get(data);
+                Derived::before_get_custom(data);
             }
+            // 如果没有定义 before_get_custom，则什么都不做
         }
     };
 

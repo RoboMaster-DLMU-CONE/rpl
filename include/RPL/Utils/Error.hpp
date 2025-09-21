@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 
-namespace rpl
+namespace RPL
 {
     enum class ErrorCode
     {
@@ -15,11 +15,12 @@ namespace rpl
         CrcMismatch,
         BufferOverflow,
         InternalError,
+        InvalidCommand,
     };
 
-    struct error
+    struct Error
     {
-        error(const ErrorCode c, std::string msg) : message(std::move(msg)), code(c)
+        Error(const ErrorCode c, std::string msg) : message(std::move(msg)), code(c)
         {
         }
 

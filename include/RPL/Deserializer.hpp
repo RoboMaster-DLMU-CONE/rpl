@@ -2,6 +2,7 @@
 #define RPL_DESERIALIZER_HPP
 
 #include "Containers/MemoryPool.hpp"
+#include "Meta/PacketInfoCollector.hpp"
 
 namespace RPL
 {
@@ -12,14 +13,14 @@ namespace RPL
     class Deserializer
     {
         using Collector = Meta::PacketInfoCollector<Ts...>;
-        Containers::MemoryPool<Collector> pool;
+        Containers::MemoryPool<Collector> pool{};
 
     public:
         template <typename T>
             requires Deserializable<T, Ts...>
         T get() const noexcept
         {
-            auto ptr = &pool.buffer[Collector::template type_index<T>()];
+            auto ptr = reinterpret_cast<uint8_t*>(&pool.buffer[Collector::template type_index<T>()]);
             Meta::PacketTraits<T>::before_get(ptr);
             return *reinterpret_cast<T*>(ptr);
         };
@@ -34,6 +35,12 @@ namespace RPL
         {
             return reinterpret_cast<T&>(pool.buffer[Collector::template type_index<T>()]);
         };
+
+        // TODO: 条件编译线程安全
+        [[nodiscard]] constexpr uint8_t* getWritePtr(uint16_t cmd) const noexcept
+        {
+            return reinterpret_cast<uint8_t*>(&pool.buffer[Collector::cmd_index(cmd)]);
+        }
     };
 }
 

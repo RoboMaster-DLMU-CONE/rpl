@@ -13,10 +13,10 @@ struct __attribute__((packed)) SamplePacket
 };
 
 template <>
-struct RPL::Meta::PacketTraits<SamplePacket> : PacketTraitsBase<PacketTraits<SamplePacket>>
+struct RPL::Meta::PacketTraits<SamplePacket> : RPL::Meta::PacketTraitsBase<RPL::Meta::PacketTraits<SamplePacket>>
 {
-    static constexpr std::uint16_t cmd = 0x0102;
-    static constexpr std::size_t size = sizeof(SamplePacket);
+    static constexpr uint16_t cmd = 0x0102;
+    static constexpr size_t size = sizeof(SamplePacket);
 };
 
 #endif //RPL_SAMPLEPACKET_HPP
