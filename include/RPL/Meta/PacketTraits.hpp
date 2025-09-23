@@ -1,6 +1,9 @@
 #ifndef RPL_INFO_HPP
 #define RPL_INFO_HPP
 
+#include <cstddef>
+#include <cstdint>
+
 namespace RPL::Meta
 {
     template <typename Derived>
