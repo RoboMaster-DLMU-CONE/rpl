@@ -1,9 +1,11 @@
 #ifndef RPL_RINGBUFFER_HPP
 #define RPL_RINGBUFFER_HPP
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <span>
 
 namespace RPL::Containers
 {
@@ -118,6 +120,22 @@ namespace RPL::Containers
             if (length > available()) return false;
             read_index = (read_index + length) & MASK;
             return true;
+        }
+
+
+        [[nodiscard]] std::span<const uint8_t> get_contiguous_read_buffer() const noexcept
+        {
+            const size_t current_read_pos = read_index;
+            const size_t current_write_pos = write_index;
+
+            if (current_read_pos <= current_write_pos)
+            {
+                return {buffer + current_read_pos, current_write_pos - current_read_pos};
+            }
+            else
+            {
+                return {buffer + current_read_pos, SIZE - current_read_pos};
+            }
         }
 
         // 获取可用数据量
