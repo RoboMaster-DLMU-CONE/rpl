@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 
-namespace rpl
+namespace RPL
 {
     enum class ErrorCode
     {
@@ -14,6 +14,8 @@ namespace rpl
         InvalidFrameHeader,
         CrcMismatch,
         BufferOverflow,
+        InternalError,
+        InvalidCommand,
     };
 
     struct Error

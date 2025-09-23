@@ -1,6 +1,6 @@
-include(Findcli11)
-include(Findfmt)
-include(Findjson)
+include(FindCli11)
+include(FindFmt)
+include(FindJson)
 
 add_executable(rplc
         main.cpp
