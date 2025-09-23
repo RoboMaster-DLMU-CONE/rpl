@@ -1,7 +1,8 @@
-#include "RPL/Packets/SamplePacket/SamplePacket.hpp"
-#include "RPL/Deserializer.hpp"
-#include "RPL/Serializer.hpp"
-#include "RPL/Parser.hpp"
+#include <RPL/Packets/Sample/SampleA.hpp>
+#include <RPL/Packets/Sample/SampleB.hpp>
+#include <RPL/Deserializer.hpp>
+#include <RPL/Serializer.hpp>
+#include <RPL/Parser.hpp>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -16,13 +17,20 @@ void print_hex_buffer(const uint8_t* buffer, size_t length)
     std::cout << std::dec << std::endl;
 }
 
-void print_packet_info(const SamplePacket& packet)
+void print_packet_info(const SampleA& packet)
 {
     std::cout << "Packet data:" << std::endl;
     std::cout << "  a: " << static_cast<int>(packet.a) << std::endl;
     std::cout << "  b: " << packet.b << std::endl;
     std::cout << "  c: " << packet.c << std::endl;
     std::cout << "  d: " << packet.d << std::endl;
+}
+
+void print_packet_info(const SampleB& packet)
+{
+    std::cout << "Packet data:" << std::endl;
+    std::cout << "  x: " << packet.x << std::endl;
+    std::cout << "  y: " << packet.y << std::endl;
 }
 
 void print_frame_breakdown(const uint8_t* buffer, size_t frame_size)
@@ -51,31 +59,40 @@ int main()
     std::cout << "=== RPL Packet Serialization/Deserialization Demo ===" << std::endl;
 
     // 创建一个示例数据包
-    SamplePacket original_packet{42, -1234, 3.14f, 2.718};
+    SampleA original_packet_a{42, -1234, 3.14f, 2.718};
+    SampleB original_packet_b{1337, 9.876};
 
-    std::cout << "\n1. Original packet:" << std::endl;
-    print_packet_info(original_packet);
+    std::cout << "\n1. Original packets:" << std::endl;
+    print_packet_info(original_packet_a);
+    print_packet_info(original_packet_b);
 
     std::cout << "\n2. Packet info:" << std::endl;
-    std::cout << "  Command: 0x" << std::hex << RPL::Meta::PacketTraits<SamplePacket>::cmd << std::dec << std::endl;
-    std::cout << "  Data size: " << RPL::Meta::PacketTraits<SamplePacket>::size << " bytes" << std::endl;
+    std::cout << "  SampleA Command: 0x" << std::hex << RPL::Meta::PacketTraits<SampleA>::cmd << std::dec << std::endl;
+    std::cout << "  SampleA Data size: " << RPL::Meta::PacketTraits<SampleA>::size << " bytes" << std::endl;
+    std::cout << "  SampleB Command: 0x" << std::hex << RPL::Meta::PacketTraits<SampleB>::cmd << std::dec << std::endl;
+    std::cout << "  SampleB Data size: " << RPL::Meta::PacketTraits<SampleB>::size << " bytes" << std::endl;
 
     // 创建序列化器和反序列化器
-    RPL::Serializer<SamplePacket> serializer;
-    RPL::Deserializer<SamplePacket> deserializer;
+    RPL::Serializer<SampleA, SampleB> serializer;
+    RPL::Deserializer<SampleA, SampleB> deserializer;
 
-    std::cout << "\n3. Serialization:" << std::endl;
+    std::cout << "\n3. Multi-packet Serialization:" << std::endl;
 
     // 计算帧大小并创建缓冲区
-    constexpr size_t frame_size = RPL::Serializer<SamplePacket>::frame_size<SamplePacket>();
-    std::vector<uint8_t> buffer(frame_size);
+    constexpr size_t total_frame_size = RPL::Serializer<SampleA, SampleB>::frame_size<SampleA>() + RPL::Serializer<
+        SampleA, SampleB>::frame_size<SampleB>();
+    std::vector<uint8_t> buffer(total_frame_size);
 
-    auto serialize_result = serializer.serialize(original_packet, buffer.data(), 1);
+    auto serialize_result = serializer.serialize(buffer.data(), buffer.size(), 1, original_packet_a, original_packet_b);
     if (serialize_result)
     {
-        std::cout << "  Serialization successful, frame size: " << *serialize_result << " bytes" << std::endl;
+        std::cout << "  Serialization successful, total frame size: " << *serialize_result << " bytes" << std::endl;
         print_hex_buffer(buffer.data(), *serialize_result);
-        print_frame_breakdown(buffer.data(), *serialize_result);
+        std::cout << "  Breaking down first frame (SampleA):" << std::endl;
+        print_frame_breakdown(buffer.data(), RPL::Serializer<SampleA, SampleB>::frame_size<SampleA>());
+        std::cout << "  Breaking down second frame (SampleB):" << std::endl;
+        print_frame_breakdown(buffer.data() + RPL::Serializer<SampleA, SampleB>::frame_size<SampleA>(),
+                              RPL::Serializer<SampleA, SampleB>::frame_size<SampleB>());
     }
     else
     {
@@ -86,7 +103,7 @@ int main()
     std::cout << "\n4. Parser + Deserializer integration:" << std::endl;
 
     // 创建 Parser，传入 Deserializer 引用
-    RPL::Parser<SamplePacket> parser{deserializer};
+    RPL::Parser<SampleA, SampleB> parser{deserializer};
 
     // 模拟分批接收数据（模拟 USB 接收）
     size_t half_size = buffer.size() / 2;
@@ -118,98 +135,52 @@ int main()
     std::cout << "\n5. Deserialization from memory pool:" << std::endl;
 
     // 从 Deserializer 获取反序列化的数据包
-    auto deserialized_packet = deserializer.get<SamplePacket>();
+    auto deserialized_packet_a = deserializer.get<SampleA>();
+    auto deserialized_packet_b = deserializer.get<SampleB>();
 
     std::cout << "  Deserialization successful!" << std::endl;
-    print_packet_info(deserialized_packet);
+    std::cout << "  --- Deserialized SampleA ---" << std::endl;
+    print_packet_info(deserialized_packet_a);
+    std::cout << "  --- Deserialized SampleB ---" << std::endl;
+    print_packet_info(deserialized_packet_b);
 
     // 验证数据一致性
     std::cout << "\n6. Data consistency check:" << std::endl;
-    bool consistent = true;
-    consistent &= (original_packet.a == deserialized_packet.a);
-    consistent &= (original_packet.b == deserialized_packet.b);
-    consistent &= (original_packet.c == deserialized_packet.c);
-    consistent &= (original_packet.d == deserialized_packet.d);
+    bool consistent_a = true;
+    consistent_a &= (original_packet_a.a == deserialized_packet_a.a);
+    consistent_a &= (original_packet_a.b == deserialized_packet_a.b);
+    consistent_a &= (original_packet_a.c == deserialized_packet_a.c);
+    consistent_a &= (original_packet_a.d == deserialized_packet_a.d);
+    std::cout << "  Data consistency for SampleA: " << (consistent_a ? "PASS" : "FAIL") << std::endl;
 
-    std::cout << "  Data consistency: " << (consistent ? "PASS" : "FAIL") << std::endl;
+    bool consistent_b = true;
+    consistent_b &= (original_packet_b.x == deserialized_packet_b.x);
+    consistent_b &= (original_packet_b.y == deserialized_packet_b.y);
+    std::cout << "  Data consistency for SampleB: " << (consistent_b ? "PASS" : "FAIL") << std::endl;
+
 
     std::cout << "\n7. Direct memory pool access:" << std::endl;
 
     // 测试直接引用访问
-    auto& direct_ref = deserializer.getRawRef<SamplePacket>();
-    SamplePacket backup = direct_ref; // 备份原数据
+    auto& direct_ref_a = deserializer.getRawRef<SampleA>();
+    SampleA backup_a = direct_ref_a; // 备份原数据
 
-    direct_ref.a = 99;
-    direct_ref.b = -9999;
+    direct_ref_a.a = 99;
+    direct_ref_a.b = -9999;
 
-    auto modified_packet = deserializer.get<SamplePacket>();
-    std::cout << "  Modified packet through direct reference:" << std::endl;
-    print_packet_info(modified_packet);
+    auto modified_packet_a = deserializer.get<SampleA>();
+    std::cout << "  Modified packet A through direct reference:" << std::endl;
+    print_packet_info(modified_packet_a);
 
     // 恢复原数据
-    direct_ref = backup;
+    direct_ref_a = backup_a;
 
     std::cout << "\n8. Parser buffer statistics:" << std::endl;
     std::cout << "  Available data: " << parser.available_data() << " bytes" << std::endl;
     std::cout << "  Available space: " << parser.available_space() << " bytes" << std::endl;
     std::cout << "  Buffer full: " << (parser.is_buffer_full() ? "Yes" : "No") << std::endl;
 
-    std::cout << "\n9. Multiple serialization methods:" << std::endl;
-
-    // 方法1: 使用 PacketVariant 进行类型安全的序列化
-    std::vector<uint8_t> buffer2(frame_size);
-    auto packet_variant = serializer.create_packet_variant(original_packet);
-    auto serialize_result2 = serializer.serialize_variant(packet_variant, buffer2.data(), 2);
-
-    if (serialize_result2)
-    {
-        std::cout << "  Variant-based serialization: " << *serialize_result2 << " bytes" << std::endl;
-        print_hex_buffer(buffer2.data(), *serialize_result2);
-    }
-
-    // 方法2: 编译期命令码序列化（完美转发）
-    std::vector<uint8_t> buffer3(frame_size);
-    auto serialize_result3 = serializer.serialize_by_cmd<0x0102>(original_packet, buffer3.data(), 3);
-
-    if (serialize_result3)
-    {
-        std::cout << "  Compile-time command-based serialization (perfect forwarding): " << *serialize_result3 <<
-            " bytes" << std::endl;
-        print_hex_buffer(buffer3.data(), *serialize_result3);
-    }
-
-    // 方法3: 运行时命令码序列化（使用 variant）
-    std::vector<uint8_t> buffer4(frame_size);
-    auto serialize_result4 = serializer.serialize_by_cmd_runtime(
-        RPL::Meta::PacketTraits<SamplePacket>::cmd,
-        packet_variant,
-        buffer4.data(),
-        4
-    );
-
-    if (serialize_result4)
-    {
-        std::cout << "  Runtime variant-based serialization: " << *serialize_result4 << " bytes" << std::endl;
-        print_hex_buffer(buffer4.data(), *serialize_result4);
-    }
-
-    // 展示新的实用方法
-    std::cout << "\n12. Modern C++ features demo:" << std::endl;
-    std::cout << "  Command 0x0102 is valid: " << (serializer.is_valid_cmd(0x0102) ? "Yes" : "No") << std::endl;
-    std::cout << "  Command 0x9999 is valid: " << (serializer.is_valid_cmd(0x9999) ? "Yes" : "No") << std::endl;
-    std::cout << "  Type index for cmd 0x0102: " << serializer.get_type_index_by_cmd(0x0102) << std::endl;
-
-    // 展示移动语义
-    SamplePacket movable_packet{88, -5555, 2.71f, 3.14159};
-    std::vector<uint8_t> buffer5(frame_size);
-    auto serialize_result5 = serializer.serialize_by_cmd<0x0102>(std::move(movable_packet), buffer5.data(), 5);
-
-    if (serialize_result5)
-    {
-        std::cout << "  Move semantics serialization: " << *serialize_result5 << " bytes" << std::endl;
-    }
-
-    std::cout << "\n10. Error handling tests:" << std::endl;
+    std::cout << "\n9. Error handling tests:" << std::endl;
 
     // 测试1: 损坏的起始字节
     std::vector<uint8_t> corrupted_buffer = buffer;
@@ -254,10 +225,14 @@ int main()
         std::cout << "    Pending data: " << parser.available_data() << " bytes" << std::endl;
     }
 
-    std::cout << "\n11. Size information:" << std::endl;
-    std::cout << "  Max frame size: " << RPL::Serializer<SamplePacket>::max_frame_size() << " bytes" << std::endl;
-    std::cout << "  SamplePacket frame size: " << serializer.frame_size<SamplePacket>() << " bytes" << std::endl;
-    std::cout << "  Frame size by command: " << serializer.frame_size_by_cmd(0x0102) << " bytes" << std::endl;
+    std::cout << "\n10. Size information:" << std::endl;
+    std::cout << "  Max frame size: " << RPL::Serializer<SampleA, SampleB>::max_frame_size() << " bytes" << std::endl;
+    std::cout << "  SampleA frame size: " << serializer.frame_size<SampleA>() << " bytes" << std::endl;
+    std::cout << "  SampleB frame size: " << serializer.frame_size<SampleB>() << " bytes" << std::endl;
+    std::cout << "  Frame size by command (SampleA): " << serializer.frame_size_by_cmd(
+        RPL::Meta::PacketTraits<SampleA>::cmd) << " bytes" << std::endl;
+    std::cout << "  Frame size by command (SampleB): " << serializer.frame_size_by_cmd(
+        RPL::Meta::PacketTraits<SampleB>::cmd) << " bytes" << std::endl;
 
     parser.clear_buffer();
     std::cout << "\n=== Demo completed successfully! ===" << std::endl;

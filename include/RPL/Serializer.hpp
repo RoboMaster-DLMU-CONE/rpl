@@ -21,92 +21,45 @@ namespace RPL
     class Serializer
     {
     public:
-        // 定义数据包变体类型
-        using PacketVariant = std::variant<Ts...>;
-
         // 序列化数据包到用户提供的缓冲区
-        template <typename T>
-            requires Serializable<T, Ts...>
-        tl::expected<size_t, Error> serialize(const T& packet, uint8_t* buffer, const uint8_t sequence_number = 0) const
+        template <typename... Packets>
+            requires (Serializable<Packets, Ts...> && ...)
+        tl::expected<size_t, Error> serialize(uint8_t* buffer, const size_t size, const uint8_t sequence_number,
+                                              const Packets&... packets) const
         {
-            using DecayedT = std::decay_t<T>;
-            constexpr uint16_t cmd = Meta::PacketTraits<DecayedT>::cmd;
-            constexpr size_t data_size = Meta::PacketTraits<DecayedT>::size;
-
             size_t offset = 0;
 
-            // 构建帧头：起始字节 + 命令码 + 数据长度 + 序号
-            buffer[0] = FRAME_START_BYTE;
-            *reinterpret_cast<uint16_t*>(buffer + 1) = cmd;
-            *reinterpret_cast<uint16_t*>(buffer + 3) = static_cast<uint16_t>(data_size);
-            buffer[5] = sequence_number;
-
-            // 计算帧头CRC8
-            const uint8_t header_crc8 = CRC8::CRC8::calc(buffer, 6);
-            buffer[6] = header_crc8;
-            offset = FRAME_HEADER_SIZE;
-
-            // 数据区：直接复制数据包内容
-            std::memcpy(buffer + offset, &packet, data_size);
-            offset += data_size;
-
-            // 帧尾CRC16：计算整个帧（除了CRC16本身）的校验和
-            const uint16_t frame_crc16 = CRC16::CCITT_FALSE::calc(buffer, offset);
-            *reinterpret_cast<uint16_t*>(buffer + offset) = frame_crc16;
-            offset += FRAME_TAIL_SIZE;
-
-            return offset; // 返回总帧长度
-        }
-
-        // 使用 variant 的类型安全序列化
-        tl::expected<size_t, Error> serialize_variant(const PacketVariant& packet_variant, uint8_t* buffer,
-                                                      const uint8_t sequence_number = 0) const
-        {
-            return std::visit([this, buffer, sequence_number](const auto& packet) -> tl::expected<size_t, Error>
+            static constexpr size_t total_size = (frame_size<Packets>() + ...);
+            if (size < total_size)
             {
-                return serialize(packet, buffer, sequence_number);
-            }, packet_variant);
-        }
+                return tl::make_unexpected(Error{ErrorCode::BufferOverflow, "Expecting a larger size buffer"});
+            }
 
-        // 通过命令码序列化（编译期分发）- 使用完美转发
-        template <uint16_t cmd, typename T>
-            requires Serializable<T, Ts...>
-        tl::expected<size_t, Error> serialize_by_cmd(T&& packet, uint8_t* buffer,
-                                                     const uint8_t sequence_number = 0) const
-        {
-            static_assert(Meta::PacketTraits<std::decay_t<T>>::cmd == cmd,
-                          "Command code mismatch with packet type");
-            return serialize(std::forward<T>(packet), buffer, sequence_number);
-        }
-
-        // 运行时通过命令码序列化 - 使用 variant
-        tl::expected<size_t, Error> serialize_by_cmd_runtime(uint16_t cmd, const PacketVariant& packet_variant,
-                                                             uint8_t* buffer, uint8_t sequence_number = 0) const
-        {
-            return std::visit([this, cmd, buffer, sequence_number](const auto& packet) -> tl::expected<size_t, Error>
+            auto serialize_one = [&]<typename T>(const T& packet)
             {
-                using PacketType = std::decay_t<decltype(packet)>;
-                if (Meta::PacketTraits<PacketType>::cmd == cmd)
-                {
-                    return serialize(packet, buffer, sequence_number);
-                }
-                return tl::unexpected(Error{ErrorCode::InvalidCommand, "Command mismatch with packet type"});
-            }, packet_variant);
-        }
+                using DecayedT = std::decay_t<T>;
+                constexpr uint16_t cmd = Meta::PacketTraits<DecayedT>::cmd;
+                constexpr size_t data_size = Meta::PacketTraits<DecayedT>::size;
+                constexpr size_t current_frame_size = frame_size<DecayedT>();
 
-        // 从原始数据创建 PacketVariant 的工厂方法
-        template <typename T>
-            requires Serializable<T, Ts...>
-        static PacketVariant create_packet_variant(T&& packet)
-        {
-            return PacketVariant{std::forward<T>(packet)};
-        }
+                uint8_t* current_buffer = buffer + offset;
+                current_buffer[0] = FRAME_START_BYTE;
+                *reinterpret_cast<uint16_t*>(current_buffer + 1) = cmd;
+                *reinterpret_cast<uint16_t*>(current_buffer + 3) = static_cast<uint16_t>(data_size);
+                current_buffer[5] = sequence_number;
 
-        // 通过命令码从原始数据创建对应的 PacketVariant
-        template <uint16_t cmd>
-        static auto create_packet_variant_by_cmd()
-        {
-            return create_packet_by_cmd_impl<cmd, Ts...>();
+                const uint8_t header_crc8 = CRC8::CRC8::calc(current_buffer, 6);
+                current_buffer[6] = header_crc8;
+                std::memcpy(current_buffer + FRAME_HEADER_SIZE, &packet, data_size);
+
+                const uint16_t frame_crc16 = CRC16::CCITT_FALSE::calc(current_buffer, FRAME_HEADER_SIZE + data_size);
+                *reinterpret_cast<uint16_t*>(current_buffer + FRAME_HEADER_SIZE + data_size) = frame_crc16;
+
+                offset += current_frame_size;
+            };
+            (serialize_one(packets), ...);
+
+            return offset;
         }
 
         // 计算指定类型的完整帧大小
