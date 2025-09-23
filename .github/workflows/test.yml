@@ -21,7 +21,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential cmake ninja-build
+          sudo apt install -y build-essential
 
       - name: Setup cmake
         uses: lukka/get-cmake@latest
