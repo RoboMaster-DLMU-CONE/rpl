@@ -94,24 +94,35 @@ namespace RPL::Containers
             return true;
         }
 
-        // 查找字节位置
-        size_t find_byte(uint8_t byte) const
+        // 查找字节位置 - 优化版本
+        size_t find_byte(uint8_t byte) const noexcept
         {
             const size_t available_data = available();
             if (available_data == 0) return SIZE_MAX;
 
             const size_t current_read = read_index;
+            const size_t current_write = write_index;
 
-            for (size_t i = 0; i < available_data; ++i)
+            if (current_read <= current_write)
             {
-                const size_t pos = (current_read + i) & MASK;
-                if (buffer[pos] == byte)
-                {
-                    return i; // 返回相对于读取位置的偏移
-                }
+                // 数据是连续的，直接使用 memchr
+                const void* found = std::memchr(buffer + current_read, byte, available_data);
+                return found ? static_cast<const uint8_t*>(found) - (buffer + current_read) : SIZE_MAX;
             }
+            else
+            {
+                // 数据分为两段
+                const size_t first_part_size = SIZE - current_read;
+                const void* found = std::memchr(buffer + current_read, byte, first_part_size);
+                if (found)
+                {
+                    return static_cast<const uint8_t*>(found) - (buffer + current_read);
+                }
 
-            return SIZE_MAX; // 未找到
+                // 在第二段中查找
+                found = std::memchr(buffer, byte, current_write);
+                return found ? first_part_size + (static_cast<const uint8_t*>(found) - buffer) : SIZE_MAX;
+            }
         }
 
         // 丢弃指定数量的字节

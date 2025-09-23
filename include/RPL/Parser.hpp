@@ -88,95 +88,142 @@ namespace RPL
         }
 
     private:
+        // 优化的快速解析路径
         tl::expected<void, Error> try_parse_packets()
         {
-            while (true)
+            // 获取缓冲区状态
+            size_t available_bytes = ringbuffer.available();
+
+            while (available_bytes >= FRAME_HEADER_SIZE)
             {
                 const auto buffer_view = ringbuffer.get_contiguous_read_buffer();
+
+                // 如果连续数据不足一个完整的最小帧，切换到慢速路径
                 if (buffer_view.size() < FRAME_HEADER_SIZE)
                 {
-                    // 如果剩余的连续数据连一个包头都放不下，就退出循环
-                    // 只有当 RingBuffer 环绕时，这里才可能为 true，而 available() > HEADER
-                    break;
-                }
-
-                // 1. 查找帧起始位置
-                const uint8_t* start_byte_ptr = static_cast<const uint8_t*>(std::memchr(
-                    buffer_view.data(), FRAME_START_BYTE, buffer_view.size()));
-
-                if (!start_byte_ptr)
-                {
-                    // 在当前连续块中未找到起始字节
-                    // 丢弃掉这部分已搜索过的数据（除了最后一个字节，因为它可能是下一个包的起始字节）
-                    const size_t discard_len = buffer_view.size() > 1 ? buffer_view.size() - 1 : 0;
-                    if (discard_len > 0)
-                    {
-                        ringbuffer.discard(discard_len);
-                    }
-                    break; // 需要获取下一个连续块
-                }
-
-                const size_t start_offset = start_byte_ptr - buffer_view.data();
-                if (start_offset > 0)
-                {
-                    ringbuffer.discard(start_offset);
-                }
-
-                // 再次获取 buffer view，因为 discard 改变了 read_pos
-                const auto frame_view = ringbuffer.get_contiguous_read_buffer();
-                if (frame_view.size() < FRAME_HEADER_SIZE)
-                {
-                    break;
-                }
-
-                // 2. 验证帧头
-                auto header_result = validate_header(frame_view.data());
-                if (!header_result)
-                {
-                    ringbuffer.discard(1); // 帧头无效，丢弃起始字节并继续搜索
-                    continue;
-                }
-
-                const auto [cmd, data_length, sequence_number] = *header_result;
-
-                // 3. 检查数据长度是否合理
-                if (data_length > max_frame_size - FRAME_HEADER_SIZE - FRAME_TAIL_SIZE)
-                {
-                    ringbuffer.discard(1);
-                    continue;
-                }
-
-                // 4. 检查完整帧是否在连续内存中
-                const size_t complete_frame_size = FRAME_HEADER_SIZE + data_length + FRAME_TAIL_SIZE;
-                if (frame_view.size() < complete_frame_size)
-                {
-                    // 完整帧不连续，回退到使用拷贝的慢速路径
                     return parse_with_copy();
                 }
 
-                // 5. 快速路径：直接在 RingBuffer 的内存上操作
-                const uint8_t* frame_ptr = frame_view.data();
+                const uint8_t* data_ptr = buffer_view.data();
+                const size_t view_size = buffer_view.size();
 
-                // 验证CRC16
-                const size_t crc16_data_len = complete_frame_size - FRAME_TAIL_SIZE;
-                const uint16_t calculated_crc16 = CRC16::CCITT_FALSE::calc(frame_ptr, crc16_data_len);
-                const uint16_t received_crc16 = *reinterpret_cast<const uint16_t*>(frame_ptr + crc16_data_len);
+                // 快速扫描起始字节 - 内联优化
+                const uint8_t* start_ptr = nullptr;
+                size_t scan_offset = 0;
 
-                if (calculated_crc16 != received_crc16)
+                // 使用更高效的搜索策略
+                while (scan_offset < view_size)
                 {
-                    ringbuffer.discard(1); // CRC错误，丢弃起始字节
-                    continue;
+                    start_ptr = static_cast<const uint8_t*>(
+                        std::memchr(data_ptr + scan_offset, FRAME_START_BYTE, view_size - scan_offset));
+
+                    if (!start_ptr)
+                    {
+                        // 没找到起始字节，丢弃大部分数据但保留最后一个字节
+                        const size_t discard_len = view_size > 1 ? view_size - 1 : 0;
+                        if (discard_len > 0)
+                        {
+                            ringbuffer.discard(discard_len);
+                            available_bytes -= discard_len;
+                        }
+                        goto next_iteration;
+                    }
+
+                    const size_t start_offset = start_ptr - data_ptr;
+
+                    // 检查是否有足够的数据进行快速验证
+                    const size_t remaining_in_view = view_size - start_offset;
+                    if (remaining_in_view < FRAME_HEADER_SIZE)
+                    {
+                        // 丢弃到起始位置，然后切换到慢速路径
+                        if (start_offset > 0)
+                        {
+                            ringbuffer.discard(start_offset);
+                            available_bytes -= start_offset;
+                        }
+                        return parse_with_copy();
+                    }
+
+                    // 快速验证帧头 - 内联所有检查以减少函数调用
+                    const uint8_t* header_ptr = start_ptr;
+
+                    // 提取帧头信息
+                    const uint16_t cmd = *reinterpret_cast<const uint16_t*>(header_ptr + 1);
+                    const uint16_t data_length = *reinterpret_cast<const uint16_t*>(header_ptr + 3);
+                    const uint8_t sequence_number = header_ptr[5];
+                    const uint8_t received_crc8 = header_ptr[6];
+
+                    // 快速CRC8验证
+                    const uint8_t calculated_crc8 = CRC8::CRC8::calc(header_ptr, 6);
+                    if (calculated_crc8 != received_crc8)
+                    {
+                        // CRC8失败，移动到下一个可能的位置
+                        scan_offset = start_offset + 1;
+                        continue;
+                    }
+
+                    // 数据长度合理性检查
+                    if (data_length > max_frame_size - FRAME_HEADER_SIZE - FRAME_TAIL_SIZE)
+                    {
+                        scan_offset = start_offset + 1;
+                        continue;
+                    }
+
+                    const size_t complete_frame_size = FRAME_HEADER_SIZE + data_length + FRAME_TAIL_SIZE;
+
+                    // 检查完整帧是否在连续内存中
+                    if (remaining_in_view < complete_frame_size)
+                    {
+                        // 丢弃到起始位置，切换到慢速路径处理跨界情况
+                        if (start_offset > 0)
+                        {
+                            ringbuffer.discard(start_offset);
+                            available_bytes -= start_offset;
+                        }
+                        return parse_with_copy();
+                    }
+
+                    // 快速CRC16验证
+                    const size_t crc16_data_len = complete_frame_size - FRAME_TAIL_SIZE;
+                    const uint16_t calculated_crc16 = CRC16::CCITT_FALSE::calc(header_ptr, crc16_data_len);
+                    const uint16_t received_crc16 = *reinterpret_cast<const uint16_t*>(header_ptr + crc16_data_len);
+
+                    if (calculated_crc16 != received_crc16)
+                    {
+                        // CRC16失败，继续搜索
+                        scan_offset = start_offset + 1;
+                        continue;
+                    }
+
+                    // 成功解析一个完整的帧
+                    // 先丢弃起始位置之前的数据
+                    if (start_offset > 0)
+                    {
+                        ringbuffer.discard(start_offset);
+                        available_bytes -= start_offset;
+                    }
+
+                    // 写入数据到deserializer
+                    uint8_t* write_ptr = deserializer.getWritePtr(cmd);
+                    if (write_ptr != nullptr)
+                    {
+                        std::memcpy(write_ptr, header_ptr + FRAME_HEADER_SIZE, data_length);
+                    }
+
+                    // 丢弃已处理的完整帧
+                    ringbuffer.discard(complete_frame_size);
+                    available_bytes -= complete_frame_size;
+
+                    // 继续处理下一个可能的帧
+                    break; // 跳出当前搜索循环，重新获取buffer_view
                 }
 
-                // 写入数据
-                uint8_t* write_ptr = deserializer.getWritePtr(cmd);
-                if (write_ptr != nullptr)
+            next_iteration:
+                // 检查是否还有足够的数据继续处理
+                if (available_bytes < FRAME_HEADER_SIZE)
                 {
-                    std::memcpy(write_ptr, frame_ptr + FRAME_HEADER_SIZE, data_length);
+                    break;
                 }
-
-                // 丢弃已处理的数据包
-                ringbuffer.discard(complete_frame_size);
             }
 
             return {};
@@ -268,7 +315,7 @@ namespace RPL
             return {};
         }
 
-        std::optional<std::tuple<uint16_t, uint16_t, uint8_t>> validate_header(const uint8_t* header)
+        static std::optional<std::tuple<uint16_t, uint16_t, uint8_t>> validate_header(const uint8_t* header)
         {
             if (header[0] != FRAME_START_BYTE)
             {
