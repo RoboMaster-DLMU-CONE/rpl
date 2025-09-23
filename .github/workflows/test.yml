@@ -1,0 +1,53 @@
+name: Test RPL
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+  workflow_dispatch:
+
+jobs:
+  test-project:
+    name: Run CTest
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential
+
+      - name: Setup cmake
+        uses: lukka/get-cmake@latest
+
+      - name: Build Project
+        run: |
+          cmake -S . -B build -G Ninja -DBUILD_RPL_TESTS=ON
+          cmake --build build
+
+      - name: Test Project
+        run: |
+          cd build
+          ctest --output-on-failure --verbose
+
+      - name: Test Project with Details
+        if: failure()
+        run: |
+          cd build
+          echo "=== Running individual test executables for debugging ==="
+          echo "--- Serialization Test ---"
+          ./tests/serialization/test_rpl_serialization || true
+          echo "--- Deserialization Test ---"
+          ./tests/deserialization/test_rpl_deserialization || true
+          echo "--- Parser Test ---"
+          ./tests/parser/test_rpl_parser || true
+          echo "--- Integration Test ---"
+          ./tests/integration/test_rpl_integration || true
+          echo "--- Traits Test ---"
+          ./tests/traits/test_rpl_traits || true
