@@ -11,6 +11,7 @@
 #include <variant>
 #include <type_traits>
 #include <optional>
+#include <algorithm>
 
 namespace RPL
 {
