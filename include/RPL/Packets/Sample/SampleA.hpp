@@ -13,7 +13,7 @@ struct __attribute__((packed)) SampleA
 };
 
 template <>
-struct RPL::Meta::PacketTraits<SampleA> : RPL::Meta::PacketTraitsBase<RPL::Meta::PacketTraits<SampleA>>
+struct RPL::Meta::PacketTraits<SampleA> : PacketTraitsBase<PacketTraits<SampleA>>
 {
     static constexpr uint16_t cmd = 0x0102;
     static constexpr size_t size = sizeof(SampleA);
