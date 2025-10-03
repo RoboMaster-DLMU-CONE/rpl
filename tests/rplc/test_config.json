@@ -1,0 +1,32 @@
+{
+  "packet_name": "TestPacket",
+  "command_id": "0x0105",
+  "namespace": null,
+  "packed": true,
+  "output": {
+    "header_file": "include/RPL/Packets/Custom/TestPacket.hpp",
+    "header_guard": "RPL_TESTPACKET_HPP"
+  },
+  "fields": [
+    {
+      "name": "sensor_id",
+      "type": "uint8_t",
+      "comment": "传感器ID"
+    },
+    {
+      "name": "temperature",
+      "type": "float",
+      "comment": "温度值(摄氏度)"
+    },
+    {
+      "name": "humidity",
+      "type": "float",
+      "comment": "湿度百分比"
+    },
+    {
+      "name": "timestamp",
+      "type": "uint64_t",
+      "comment": "时间戳(毫秒)"
+    }
+  ]
+}

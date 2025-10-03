@@ -1,0 +1,26 @@
+{
+  "packet_name": "SensorPacket",
+  "command_id": "0x0201",
+  "namespace": "Robot::Sensors",
+  "packed": true,
+  "output": {
+    "header_file": "include/RPL/Packets/Robot/SensorPacket.hpp"
+  },
+  "fields": [
+    {
+      "name": "device_id",
+      "type": "uint16_t",
+      "comment": "设备ID"
+    },
+    {
+      "name": "position_x",
+      "type": "double",
+      "comment": "X坐标"
+    },
+    {
+      "name": "position_y",
+      "type": "double",
+      "comment": "Y坐标"
+    }
+  ]
+}

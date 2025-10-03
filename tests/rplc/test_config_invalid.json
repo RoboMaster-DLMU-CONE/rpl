@@ -1,0 +1,16 @@
+{
+  "packet_name": "123InvalidName",
+  "command_id": "999999",
+  "namespace": "invalid::name space",
+  "packed": true,
+  "output": {
+    "header_file": "test.txt"
+  },
+  "fields": [
+    {
+      "name": "class",
+      "type": "invalid_type",
+      "comment": "这是一个无效字段"
+    }
+  ]
+}
