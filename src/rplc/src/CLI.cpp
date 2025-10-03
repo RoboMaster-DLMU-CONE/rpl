@@ -20,8 +20,8 @@ namespace rplc
           ->check(::CLI::ExistingFile);
 
         // 可选参数
-        app.add_option("-o,--output-dir", options.output_dir,
-                       "Output directory (overrides config file setting)");
+        app.add_option("-o,--output", options.output_path,
+                       "Output file path (default: <packet_name>.hpp in current directory)");
 
         app.add_flag("-v,--validate", options.validate_only,
                      "Validate configuration only, don't generate code");
@@ -96,7 +96,7 @@ namespace rplc
         fmt::print("Arguments:\n");
         fmt::print("  config_file              JSON configuration file\n\n");
         fmt::print("Options:\n");
-        fmt::print("  -o, --output-dir DIR     Override output directory\n");
+        fmt::print("  -o, --output FILE        Output file path (default: <packet_name>.hpp)\n");
         fmt::print("  -v, --validate           Validate configuration only\n");
         fmt::print("  -b, --backup             Create backup of existing files\n");
         fmt::print("  -f, --force              Force overwrite without confirmation\n");
@@ -106,7 +106,7 @@ namespace rplc
         fmt::print("Examples:\n");
         fmt::print("  rplc config.json                    Generate header file\n");
         fmt::print("  rplc config.json --validate         Validate configuration only\n");
-        fmt::print("  rplc config.json -o ./output        Override output directory\n");
+        fmt::print("  rplc config.json -o MyPacket.hpp    Specify output file path\n");
         fmt::print("  rplc config.json --backup --force   Backup and force overwrite\n");
     }
 
@@ -168,14 +168,24 @@ namespace rplc
             fmt::print("✓ Configuration is valid\n\n");
         }
 
-        // 调整输出路径
-        std::string output_path = config->output.header_file;
-        if (!options.output_dir.empty())
+        // 确定输出路径
+        std::string output_path;
+        if (!options.output_path.empty())
         {
-            output_path = adjust_output_path(output_path, options.output_dir);
+            // 用户指定了输出路径
+            output_path = options.output_path;
             if (options.verbose)
             {
-                fmt::print("Output path adjusted to: {}\n", output_path);
+                fmt::print("Using user-specified output path: {}\n", output_path);
+            }
+        }
+        else
+        {
+            // 使用默认路径：当前目录下的<packet_name>.hpp
+            output_path = generate_default_output_path(config->packet_name);
+            if (options.verbose)
+            {
+                fmt::print("Using default output path: {}\n", output_path);
             }
         }
 
@@ -257,46 +267,8 @@ namespace rplc
         return response == "y" || response == "Y" || response == "yes" || response == "YES";
     }
 
-    std::string CLI::adjust_output_path(const std::string& original_path,
-                                        const std::string& output_dir)
+    std::string CLI::generate_default_output_path(const std::string& packet_name)
     {
-        try
-        {
-            std::filesystem::path orig(original_path);
-            std::filesystem::path dir(output_dir);
-
-            if (orig.is_absolute())
-            {
-                // 如果原路径是绝对路径，使用输出目录 + 文件名
-                return (dir / orig.filename()).string();
-            }
-            else
-            {
-                // 如果原路径是相对路径，使用输出目录 + 原路径
-                return (dir / orig).string();
-            }
-        }
-        catch (const std::exception&)
-        {
-            // 如果解析失败，使用简单拼接
-            std::string result = output_dir;
-            if (!result.empty() && result.back() != '/' && result.back() != '\\')
-            {
-                result += '/';
-            }
-
-            // 提取文件名
-            const size_t pos = original_path.find_last_of("/\\");
-            if (pos != std::string::npos)
-            {
-                result += original_path.substr(pos + 1);
-            }
-            else
-            {
-                result += original_path;
-            }
-
-            return result;
-        }
+        return packet_name + ".hpp";
     }
 } // namespace rplc

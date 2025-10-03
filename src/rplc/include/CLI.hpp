@@ -11,7 +11,7 @@ namespace rplc {
  */
 struct CLIOptions {
     std::string config_file;         // 配置文件路径
-    std::string output_dir;          // 输出目录（可选，覆盖配置文件中的路径）
+    std::string output_path;         // 输出文件路径（可选，覆盖默认路径）
     bool validate_only = false;      // 仅验证配置，不生成代码
     bool backup_files = false;       // 是否备份现有文件
     bool verbose = false;            // 详细输出
@@ -92,13 +92,11 @@ private:
     static bool confirm_overwrite(const std::string& filepath, bool force_overwrite);
 
     /**
-     * 调整输出路径
-     * @param original_path 原始路径
-     * @param output_dir 输出目录
-     * @return 调整后的路径
+     * 生成默认输出文件路径
+     * @param packet_name 包名称
+     * @return 默认的输出文件路径
      */
-    static std::string adjust_output_path(const std::string& original_path, 
-                                         const std::string& output_dir);
+    static std::string generate_default_output_path(const std::string& packet_name);
 };
 
 } // namespace rplc
