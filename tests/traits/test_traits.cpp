@@ -145,40 +145,38 @@ void test_struct_memory_layout() {
     
     // Test SampleA layout
     SampleA sample_a{};
-    uint8_t* ptr_a = reinterpret_cast<uint8_t*>(&sample_a);
-    
-    // Check field offsets for SampleA
-    auto* a_field = reinterpret_cast<uint8_t*>(&sample_a.a);
-    auto* b_field = reinterpret_cast<int16_t*>(&sample_a.b);
-    auto* c_field = reinterpret_cast<float*>(&sample_a.c);
-    auto* d_field = reinterpret_cast<double*>(&sample_a.d);
-    
-    assert(a_field == ptr_a + 0);
-    assert(b_field == reinterpret_cast<int16_t*>(ptr_a + 1));
-    assert(c_field == reinterpret_cast<float*>(ptr_a + 3));
-    assert(d_field == reinterpret_cast<double*>(ptr_a + 7));
-    
+    constexpr std::size_t off_a = offsetof(SampleA, a);
+    constexpr std::size_t off_b = offsetof(SampleA, b);
+    constexpr std::size_t off_c = offsetof(SampleA, c);
+
+    constexpr std::size_t off_d = offsetof(SampleA, d);
+
+    // 断言预期偏移（根据 SampleA 的定义）
+    assert(off_a == 0);
+    assert(off_b == 1);
+    assert(off_c == 3);
+    assert(off_d == 7);
+
     std::cout << "  SampleA field offsets:" << std::endl;
-    std::cout << "    a: " << (a_field - ptr_a) << std::endl;
-    std::cout << "    b: " << (reinterpret_cast<uint8_t*>(b_field) - ptr_a) << std::endl;
-    std::cout << "    c: " << (reinterpret_cast<uint8_t*>(c_field) - ptr_a) << std::endl;
-    std::cout << "    d: " << (reinterpret_cast<uint8_t*>(d_field) - ptr_a) << std::endl;
+    std::cout << "    a: " << off_a << std::endl;
+    std::cout << "    b: " << off_b << std::endl;
+    std::cout << "    c: " << off_c << std::endl;
+    std::cout << "    d: " << off_d << std::endl;
+
     
     // Test SampleB layout (not packed, so may have padding)
     SampleB sample_b{};
-    uint8_t* ptr_b = reinterpret_cast<uint8_t*>(&sample_b);
-    
-    auto* x_field = reinterpret_cast<int*>(&sample_b.x);
-    auto* y_field = reinterpret_cast<double*>(&sample_b.y);
-    
-    assert(x_field == reinterpret_cast<int*>(ptr_b + 0));
-    // Note: y_field may have padding, so we just check it's after x_field
-    assert(reinterpret_cast<uint8_t*>(y_field) >= reinterpret_cast<uint8_t*>(x_field) + sizeof(int));
-    
+    constexpr std::size_t off_x = offsetof(SampleB, x);
+    constexpr std::size_t off_y = offsetof(SampleB, y);
+
+    assert(off_x == 0);
+    // y 应在 x 之后（可能有填充）
+    assert(off_y >= off_x + sizeof(int));
+
     std::cout << "  SampleB field offsets:" << std::endl;
-    std::cout << "    x: " << (reinterpret_cast<uint8_t*>(x_field) - ptr_b) << std::endl;
-    std::cout << "    y: " << (reinterpret_cast<uint8_t*>(y_field) - ptr_b) << std::endl;
-    
+    std::cout << "    x: " << off_x << std::endl;
+    std::cout << "    y: " << off_y << std::endl;
+
     std::cout << "✓ Struct memory layout verification passed" << std::endl;
 }
 

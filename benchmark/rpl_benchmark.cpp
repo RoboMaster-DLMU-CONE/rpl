@@ -5,7 +5,6 @@
 #include <RPL/Packets/Sample/SampleA.hpp>
 #include <RPL/Packets/Sample/SampleB.hpp>
 #include <vector>
-#include <numeric>
 
 // Define the packets for benchmarking
 using PacketA = SampleA;
@@ -59,7 +58,7 @@ static void BM_Deserialization_GetPacket(benchmark::State& state)
 
     for (auto _ : state)
     {
-        PacketA packet = deserializer.get<PacketA>();
+        auto packet = deserializer.get<PacketA>();
         benchmark::DoNotOptimize(packet);
     }
 }
@@ -88,12 +87,12 @@ public:
         // Prepare single packet buffer
         constexpr size_t frame_size_a = RPL::Serializer<PacketA, PacketB>::frame_size<PacketA>();
         single_packet_buffer.resize(frame_size_a);
-        serializer.serialize(single_packet_buffer.data(), single_packet_buffer.size(), 1, packet_a);
+        (void)serializer.serialize(single_packet_buffer.data(), single_packet_buffer.size(), 1, packet_a);
 
         // Prepare multi-packet buffer
         constexpr size_t frame_size_b = RPL::Serializer<PacketA, PacketB>::frame_size<PacketB>();
         multi_packet_buffer.resize(frame_size_a + frame_size_b);
-        serializer.serialize(multi_packet_buffer.data(), multi_packet_buffer.size(), 1, packet_a, packet_b);
+        (void)serializer.serialize(multi_packet_buffer.data(), multi_packet_buffer.size(), 1, packet_a, packet_b);
 
         // Prepare noisy buffer (some garbage at the beginning)
         std::vector<uint8_t> garbage(50, 0xAB);
