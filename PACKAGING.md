@@ -45,12 +45,14 @@ find_package(rpl REQUIRED)
 target_link_libraries(your_target PRIVATE rpl::rpl)
 ```
 
-**注意**: 使用 RPL 库时，你还需要手动安装以下依赖：
+**注意**: RPL 库的所有依赖已经打包在内，包括：
 
-- tl::expected
-- cppcrc
-- frozen
-- ringbuffer
+- tl::expected (已打包)
+- cppcrc (已打包为头文件)
+- frozen (已打包)
+- ringbuffer (RPL 内部实现，已包含)
+
+不需要手动安装任何额外依赖。
 
 ---
 
@@ -161,6 +163,49 @@ sudo apt-get install dpkg-dev rpm
 所有包的版本号由 `CMakeLists.txt` 中的 `project(rpl VERSION 0.1.0)` 定义。
 
 修改版本号后，重新运行 CMake 配置即可生成新版本的包。
+
+---
+
+## 自动化打包（GitHub Actions）
+
+本项目已配置自动化打包工作流，可以自动生成和发布 RPL 库的安装包。
+
+### 触发方式
+
+1. **创建版本标签** - 推送符合 `v*` 格式的标签（如 `v0.1.0`）
+2. **手动触发** - 在 GitHub Actions 界面手动运行 "Package RPL" 工作流
+
+### 自动生成的包
+
+工作流会自动生成以下格式的包：
+
+- `rpl-{version}-Linux.tar.gz` - TGZ 压缩包
+- `rpl-{version}-Linux.zip` - ZIP 压缩包
+- `rpl-{version}-Linux.deb` - Debian/Ubuntu 包
+- `rpl-{version}-Linux.rpm` - RPM 包
+
+### 包的获取
+
+- **标签触发**: 包会自动上传到对应 Release 的 Assets 中
+- **手动触发**: 包可在工作流运行页面的 Artifacts 中下载（保留 90 天）
+
+### 手动创建和发布版本
+
+```bash
+# 1. 更新版本号
+# 编辑 CMakeLists.txt，修改 project(rpl VERSION x.y.z)
+
+# 2. 提交版本变更
+git add CMakeLists.txt
+git commit -m "Bump version to x.y.z"
+git push
+
+# 3. 创建并推送标签
+git tag vx.y.z
+git push origin vx.y.z
+
+# 4. GitHub Actions 会自动构建并发布包到 Release
+```
 
 ---
 
