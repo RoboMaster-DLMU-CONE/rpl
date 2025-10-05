@@ -1,7 +1,7 @@
 set(BENCHMARK_ENABLE_GTEST_TESTS OFF)
 set(BENCHMARK_ENABLE_TESTING OFF)
 
-find_package(benchmark QUIET)
+find_package(benchmark CONFIG QUIET)
 
 if (NOT benchmark_FOUND)
     message(STATUS "Google Benchmark can't be found locally, try fetching from remote...")

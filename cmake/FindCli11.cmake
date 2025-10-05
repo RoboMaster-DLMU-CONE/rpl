@@ -1,4 +1,4 @@
-find_package(CLI11 QUIET)
+find_package(CLI11 CONFIG QUIET)
 
 if (NOT CLI11_FOUND)
     FetchContent_Declare(

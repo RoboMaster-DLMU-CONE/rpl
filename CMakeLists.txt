@@ -8,13 +8,17 @@ option(BUILD_RPL_BENCHMARK "Enable building RPL Benchmark" OFF)
 option(BUILD_RPL_TESTS "Enable building RPL Tests" OFF)
 option(BUILD_RPLC "Enable build RPLC" OFF)
 option(BUILD_RPL_LIBRARY "Enable build RPL Library" ON)
+option(BUILD_RPL_SAMPLES "Enable building RPL Samples" OFF)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 20)
 set(FRAME_HEADER_TAG "0xA5")
 
 add_subdirectory(src)
-add_subdirectory(samples)
+
+if (BUILD_RPL_SAMPLES)
+    add_subdirectory(samples)
+endif ()
 
 if (BUILD_RPL_BENCHMARK)
     include(FindGoogleBenchmark)

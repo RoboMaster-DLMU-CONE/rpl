@@ -1,4 +1,4 @@
-find_package(nlohmann_json QUIET)
+find_package(nlohmann_json CONFIG QUIET)
 
 if (NOT nlohmann_json_FOUND)
 
@@ -7,5 +7,5 @@ if (NOT nlohmann_json_FOUND)
     endif ()
     FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
     FetchContent_MakeAvailable(json)
-    
+
 endif ()

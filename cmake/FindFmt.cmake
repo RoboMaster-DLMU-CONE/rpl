@@ -1,4 +1,4 @@
-find_package(fmt QUIET)
+find_package(fmt CONFIG QUIET)
 
 if (NOT fmt_FOUND)
 

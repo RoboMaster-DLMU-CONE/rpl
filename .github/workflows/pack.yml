@@ -1,5 +1,8 @@
 name: Package RPL
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
@@ -8,6 +11,8 @@ on:
 
 jobs:
   package-rpl:
+    permissions:
+      contents: write
     name: Build and Package RPL Library
     runs-on: ubuntu-24.04
     steps:
@@ -53,6 +58,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             build/rpl-*.tar.gz
             build/rpl-*.zip
@@ -62,27 +68,42 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   package-rplc-windows:
+    permissions:
+      contents: write
     name: Build and Package RPLC for Windows
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup CMake
-        uses: lukka/get-cmake@latest
-
-      - name: Install NSIS
-        uses: repolevedavaj/install-nsis@v1.0.2
+      - name: Cache vcpkg
+        uses: actions/cache@v4
         with:
-          nsis-version: 3.10
+          path: ${{ github.workspace }}/vcpkg
+          key: ${{ runner.os }}-vcpkg
+
+      - name: Setup Environment
+        run: choco install cmake nsis --no-progress -y
+
+      - name: vcpkg build
+        uses: johnwason/vcpkg-action@v7
+        id: vcpkg
+        with:
+          pkgs: cli11 fmt nlohmann-json
+          triplet: x64-windows-release
+          token: ${{ github.token }}
 
       - name: Configure Project
-        run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_RPLC=ON
+        run: cmake ${{ steps.vcpkg.outputs.vcpkg-cmake-config }} \
+          -S . -B build \
+          -DBUILD_RPLC=ON \
+          -DBUILD_RPL_LIBRARY=OFF \
+          -DBUILD_RPL_BENCHMARK=OFF \
+          -DBUILD_RPL_TESTS=OFF \
+          -DBUILD_RPL_SAMPLES=OFF
 
       - name: Build Project
-        run: |
-          cmake --build build --config Release
+        run: cmake --build build --config Release
 
       - name: Generate NSIS Installer
         run: |
@@ -109,12 +130,15 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             build/rplc-*.exe
             build/rplc-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   package-rplc-linux:
+    permissions:
+      contents: write
     name: Build and Package RPLC for Linux
     runs-on: ubuntu-24.04
     steps:
@@ -124,7 +148,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential dpkg-dev rpm ninja
+          sudo apt install -y build-essential dpkg-dev rpm ninja-build
 
       - name: Setup CMake
         uses: lukka/get-cmake@latest
@@ -160,6 +184,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             build/rplc-*.tar.gz
             build/rplc-*.zip
