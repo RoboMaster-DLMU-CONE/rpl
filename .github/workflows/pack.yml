@@ -114,3 +114,56 @@ jobs:
             build/rplc-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  package-rplc-linux:
+    name: Build and Package RPLC for Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential dpkg-dev rpm ninja
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Configure Project
+        run: |
+          cmake -S . -B build -G Ninja -DBUILD_RPLC=ON
+
+      - name: Build Project
+        run: |
+          cmake --build build
+
+      - name: Generate Packages
+        run: |
+          cd build
+          cpack -G TGZ
+          cpack -G ZIP
+          cpack -G DEB
+          cpack -G RPM
+
+      - name: List Generated Packages
+        run: |
+          ls -lh build/rplc-*
+
+      - name: Upload Packages as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rplc-linux-packages
+          path: build/rplc-*.*
+          retention-days: 90
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/rplc-*.tar.gz
+            build/rplc-*.zip
+            build/rplc-*.deb
+            build/rplc-*.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
