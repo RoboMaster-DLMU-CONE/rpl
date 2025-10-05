@@ -13,3 +13,8 @@ add_executable(rplc
 
 target_include_directories(rplc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rplc PRIVATE CLI11::CLI11 fmt::fmt nlohmann_json::nlohmann_json)
+
+# Install the rplc executable
+install(TARGETS rplc
+        RUNTIME DESTINATION bin
+)

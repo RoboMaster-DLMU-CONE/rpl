@@ -1,2 +1,5 @@
 add_subdirectory(rpl)
-add_subdirectory(rplc)
+
+if (BUILD_RPLC)
+    add_subdirectory(rplc)
+endif ()
