@@ -60,3 +60,57 @@ jobs:
             build/rpl-*.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  package-rplc-windows:
+    name: Build and Package RPLC for Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Install NSIS
+        uses: repolevedavaj/install-nsis@v1.0.2
+        with:
+          nsis-version: 3.10
+
+      - name: Configure Project
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_RPLC=ON
+
+      - name: Build Project
+        run: |
+          cmake --build build --config Release
+
+      - name: Generate NSIS Installer
+        run: |
+          cd build
+          cpack -C Release -G NSIS
+
+      - name: Generate Standalone ZIP
+        run: |
+          cd build
+          cpack -C Release -G ZIP
+
+      - name: List Generated Packages
+        run: |
+          Get-ChildItem -Path build\rplc-* -File
+
+      - name: Upload Packages as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rplc-windows-packages
+          path: build/rplc-*.*
+          retention-days: 90
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/rplc-*.exe
+            build/rplc-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

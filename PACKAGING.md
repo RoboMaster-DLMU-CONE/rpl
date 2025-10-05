@@ -179,10 +179,15 @@ sudo apt-get install dpkg-dev rpm
 
 工作流会自动生成以下格式的包：
 
+**RPL 库包（Linux）:**
 - `rpl-{version}-Linux.tar.gz` - TGZ 压缩包
 - `rpl-{version}-Linux.zip` - ZIP 压缩包
 - `rpl-{version}-Linux.deb` - Debian/Ubuntu 包
 - `rpl-{version}-Linux.rpm` - RPM 包
+
+**RPLC 工具包（Windows）:**
+- `rplc-{version}-win64.exe` - NSIS 安装程序（包含卸载功能，自动添加到 PATH）
+- `rplc-{version}-win64.zip` - 单独的可执行文件压缩包
 
 ### 包的获取
 
