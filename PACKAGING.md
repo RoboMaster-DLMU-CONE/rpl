@@ -173,7 +173,10 @@ sudo apt-get install dpkg-dev rpm
 ### 触发方式
 
 1. **创建版本标签** - 推送符合 `v*` 格式的标签（如 `v0.1.0`）
-2. **手动触发** - 在 GitHub Actions 界面手动运行 "Package RPL" 工作流
+2. **手动触发** - 在 GitHub Actions 界面手动运行相应的工作流：
+   - "Package RPL" - RPL 库打包
+   - "Package RPLC for Linux" - RPLC Linux 打包
+   - "Package RPL" - RPLC Windows 打包（包含在 Package RPL 工作流中）
 
 ### 自动生成的包
 
@@ -184,6 +187,12 @@ sudo apt-get install dpkg-dev rpm
 - `rpl-{version}-Linux.zip` - ZIP 压缩包
 - `rpl-{version}-Linux.deb` - Debian/Ubuntu 包
 - `rpl-{version}-Linux.rpm` - RPM 包
+
+**RPLC 工具包（Linux）:**
+- `rplc-{version}-Linux.tar.gz` - TGZ 压缩包
+- `rplc-{version}-Linux.zip` - ZIP 压缩包
+- `rplc-{version}-Linux.deb` - Debian/Ubuntu 包
+- `rplc-{version}-Linux.rpm` - RPM 包
 
 **RPLC 工具包（Windows）:**
 - `rplc-{version}-win64.exe` - NSIS 安装程序（包含卸载功能，自动添加到 PATH）
