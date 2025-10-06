@@ -83,14 +83,16 @@ jobs:
           key: ${{ runner.os }}-vcpkg
 
       - name: Setup Environment
-        run: choco install cmake nsis --no-progress -y
+        run: |
+          choco install cmake wixtoolset --no-progress -y
+          refreshenv
 
       - name: vcpkg build
         uses: johnwason/vcpkg-action@v7
         id: vcpkg
         with:
           pkgs: cli11 fmt nlohmann-json
-          triplet: x64-windows-release
+          triplet: x64-windows-static
           token: ${{ github.token }}
 
       - name: Configure Project
@@ -100,15 +102,16 @@ jobs:
           -DBUILD_RPL_LIBRARY=OFF \
           -DBUILD_RPL_BENCHMARK=OFF \
           -DBUILD_RPL_TESTS=OFF \
-          -DBUILD_RPL_SAMPLES=OFF
+          -DBUILD_RPL_SAMPLES=OFF \
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
       - name: Build Project
         run: cmake --build build --config Release
 
-      - name: Generate NSIS Installer
+      - name: Generate WiX Installer
         run: |
           cd build
-          cpack -C Release -G NSIS
+          cpack -C Release -G WIX
 
       - name: Generate Standalone ZIP
         run: |
@@ -132,7 +135,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
-            build/rplc-*.exe
+            build/rplc-*.msi
             build/rplc-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

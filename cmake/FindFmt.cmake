@@ -7,6 +7,9 @@ if (NOT fmt_FOUND)
     if (BUILD_RPLC AND NOT BUILD_RPL_LIBRARY)
         set(FMT_INSTALL OFF CACHE BOOL "Disable fmt installation for RPLC-only build" FORCE)
     endif ()
+    
+    # Force static library build for fmt
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build fmt as static library" FORCE)
 
     FetchContent_Declare(
             fmt
