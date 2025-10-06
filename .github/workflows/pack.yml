@@ -155,7 +155,7 @@ jobs:
 
       - name: Configure Project
         run: |
-          cmake -S . -B build -G Ninja -DBUILD_RPLC=ON
+          cmake -S . -B build -G Ninja -DBUILD_RPLC=ON -DBUILD_RPL_LIBRARY=OFF
 
       - name: Build Project
         run: |

@@ -15,4 +15,4 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
 # RPM settings for development package
 set(CPACK_RPM_PACKAGE_NAME "rpl-devel")
 set(CPACK_RPM_PACKAGE_LICENSE "ISC")
-set(CPACK_DEBIAN_PACKAGE_GROUP "Development/Libraries")
+set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
