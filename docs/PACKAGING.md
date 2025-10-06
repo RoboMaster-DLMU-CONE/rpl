@@ -77,7 +77,7 @@ cpack -G TGZ    # 生成 .tar.gz 包
 cpack -G ZIP    # 生成 .zip 包
 cpack -G DEB    # 生成 .deb 包（需要 dpkg-dev）
 cpack -G RPM    # 生成 .rpm 包（需要 rpmbuild）
-cpack -G NSIS   # 生成 .exe 安装程序（仅 Windows，需要 NSIS）
+cpack -G WIX    # 生成 .msi 安装程序（仅 Windows，需要 WiX Toolset）
 ```
 
 ### RPLC 工具包内容
@@ -98,7 +98,7 @@ rplc --help
 
 ## Windows 平台打包（RPLC）
 
-在 Windows 上生成 NSIS 安装程序：
+在 Windows 上生成 WiX 安装程序：
 
 ```bash
 # 使用 Visual Studio 生成器
@@ -107,15 +107,15 @@ cmake .. -G "Visual Studio 17 2022" -DBUILD_RPLC=ON
 # 构建 Release 版本
 cmake --build . --config Release
 
-# 生成 NSIS 安装程序（需要先安装 NSIS）
-cpack -G NSIS
+# 生成 WiX 安装程序（需要先安装 WiX Toolset）
+cpack -C Release -G WIX
 ```
 
-这会生成一个 `rplc-0.1.0-win64.exe` 安装程序，支持：
+这会生成一个 `rplc-0.1.1-win64.msi` 安装程序，支持：
 
-- 自动添加到系统 PATH
-- 卸载前自动删除旧版本
+- 自动添加到系统 PATH（无长度限制）
 - 标准的 Windows 安装向导
+- 升级和卸载功能
 
 ---
 
@@ -134,7 +134,7 @@ cpack -G NSIS
 - ✅ **ZIP** (.zip) - 通用压缩包
 - ✅ **DEB** (.deb) - Debian/Ubuntu 包
 - ✅ **RPM** (.rpm) - RedHat/Fedora/CentOS 包
-- ✅ **NSIS** (.exe) - Windows 安装程序
+- ✅ **WiX** (.msi) - Windows 安装程序
 
 ---
 
@@ -154,7 +154,7 @@ sudo apt-get install dpkg-dev rpm
 
 ### Windows
 
-下载并安装 [NSIS](https://nsis.sourceforge.io/)
+下载并安装 [WiX Toolset](https://wixtoolset.org/)
 
 ---
 
@@ -195,7 +195,7 @@ sudo apt-get install dpkg-dev rpm
 - `rplc-{version}-Linux.rpm` - RPM 包
 
 **RPLC 工具包（Windows）:**
-- `rplc-{version}-win64.exe` - NSIS 安装程序（包含卸载功能，自动添加到 PATH）
+- `rplc-{version}-win64.msi` - WiX 安装程序（自动添加到 PATH，无长度限制）
 - `rplc-{version}-win64.zip` - 单独的可执行文件压缩包
 
 ### 包的获取
