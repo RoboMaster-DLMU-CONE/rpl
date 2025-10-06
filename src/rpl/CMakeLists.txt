@@ -21,48 +21,51 @@ target_compile_definitions(rpl INTERFACE
         FRAME_HEADER_TAG=${FRAME_HEADER_TAG}
 )
 
-# Install RPL library headers
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/RPL
-        DESTINATION include
-        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
-)
+# Only install RPL library components when building the library package
+if (BUILD_RPL_LIBRARY)
+    # Install RPL library headers
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/RPL
+            DESTINATION include
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+    )
 
-# Install cppcrc header (it's a header-only library without install support)
-install(FILES ${cppcrc_SOURCE_DIR}/cppcrc.h
-        DESTINATION include
-)
+    # Install cppcrc header (it's a header-only library without install support)
+    install(FILES ${cppcrc_SOURCE_DIR}/cppcrc.h
+            DESTINATION include
+    )
 
-# Install the rpl target
-install(TARGETS rpl
-        EXPORT rplTargets
-        INCLUDES DESTINATION include
-)
+    # Install the rpl target
+    install(TARGETS rpl
+            EXPORT rplTargets
+            INCLUDES DESTINATION include
+    )
 
-# Create and install CMake package config files
-include(CMakePackageConfigHelpers)
+    # Create and install CMake package config files
+    include(CMakePackageConfigHelpers)
 
-# Configure the package config file from template
-configure_package_config_file(
-        ${PROJECT_SOURCE_DIR}/cmake/rplConfig.cmake.in
-        ${CMAKE_CURRENT_BINARY_DIR}/rplConfig.cmake
-        INSTALL_DESTINATION lib/cmake/rpl
-)
+    # Configure the package config file from template
+    configure_package_config_file(
+            ${PROJECT_SOURCE_DIR}/cmake/rplConfig.cmake.in
+            ${CMAKE_CURRENT_BINARY_DIR}/rplConfig.cmake
+            INSTALL_DESTINATION lib/cmake/rpl
+    )
 
-write_basic_package_version_file(
-        ${CMAKE_CURRENT_BINARY_DIR}/rplConfigVersion.cmake
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion
-)
+    write_basic_package_version_file(
+            ${CMAKE_CURRENT_BINARY_DIR}/rplConfigVersion.cmake
+            VERSION ${PROJECT_VERSION}
+            COMPATIBILITY SameMajorVersion
+    )
 
-# Install the export set
-install(EXPORT rplTargets
-        FILE rplTargets.cmake
-        NAMESPACE rpl::
-        DESTINATION lib/cmake/rpl
-)
+    # Install the export set
+    install(EXPORT rplTargets
+            FILE rplTargets.cmake
+            NAMESPACE rpl::
+            DESTINATION lib/cmake/rpl
+    )
 
-install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/rplConfig.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/rplConfigVersion.cmake
-        DESTINATION lib/cmake/rpl
-)
+    install(FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/rplConfig.cmake
+            ${CMAKE_CURRENT_BINARY_DIR}/rplConfigVersion.cmake
+            DESTINATION lib/cmake/rpl
+    )
+endif ()
