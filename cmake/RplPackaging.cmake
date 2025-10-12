@@ -1,6 +1,6 @@
 # CPack configuration for RPL library package
 set(CPACK_PACKAGE_NAME "rpl")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION "${RPL_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "RPL - RoboMaster Packet Library")
 
 # Generators for library (development package)

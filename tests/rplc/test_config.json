@@ -3,10 +3,7 @@
   "command_id": "0x0105",
   "namespace": null,
   "packed": true,
-  "output": {
-    "header_file": "include/RPL/Packets/Custom/TestPacket.hpp",
-    "header_guard": "RPL_TESTPACKET_HPP"
-  },
+  "header_guard": "RPL_TESTPACKET_HPP",
   "fields": [
     {
       "name": "sensor_id",

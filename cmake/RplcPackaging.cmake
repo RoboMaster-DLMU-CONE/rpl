@@ -1,6 +1,6 @@
 # CPack configuration for RPLC executable package
 set(CPACK_PACKAGE_NAME "rplc")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION "${RPLC_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "RPLC - RPL Command Line Tool")
 
 # Generators for executable (end-user tool)

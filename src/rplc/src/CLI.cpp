@@ -1,40 +1,52 @@
-#include "../include/CLI.hpp"
-#include "../include/Config.hpp"
-#include "../include/Validator.hpp"
-#include "../include/Generator.hpp"
-#include "../include/FileWriter.hpp"
+#include "CLI.hpp"
+#include "Config.hpp"
+#include "Validator.hpp"
+#include "Generator.hpp"
+#include "FileWriter.hpp"
+#include "Version.hpp"
 #include <CLI/CLI.hpp>
 #include <iostream>
 #include <fmt/core.h>
+#include <filesystem>
+
 
 namespace rplc
 {
     std::optional<CLIOptions> CLI::parse_arguments(int argc, char* argv[])
     {
         ::CLI::App app{"RPLC - RPL Packet Compiler", "rplc"};
+        app.require_subcommand(0, 1); // 允许0或1个子命令
 
         CLIOptions options;
 
-        // 必需参数：配置文件
-        app.add_option("config", options.config_file, "JSON configuration file")
-          ->check(::CLI::ExistingFile);
+        // Generate 子命令
+        auto* generate_cmd = app.add_subcommand("generate", "Generate packet header file from configuration");
+        generate_cmd->add_option("config", options.config_file, "JSON configuration file")
+                    ->required()
+                    ->check(::CLI::ExistingFile);
 
-        // 可选参数
-        app.add_option("-o,--output", options.output_path,
-                       "Output file path (default: <packet_name>.hpp in current directory)");
+        // --output 既可以是目录也可以是完整文件路径
+        generate_cmd->add_option("-o,--output", options.output_path,
+                                 "Output file path OR directory (default: <config_name>.hpp next to config file)");
 
-        app.add_flag("-v,--validate", options.validate_only,
-                     "Validate configuration only, don't generate code");
+        generate_cmd->add_flag("-b,--backup", options.backup_files,
+                               "Create backup of existing files before overwriting");
+        generate_cmd->add_flag("-f,--force", options.force_overwrite,
+                               "Force overwrite existing files without confirmation");
 
-        app.add_flag("-b,--backup", options.backup_files,
-                     "Create backup of existing files before overwriting");
+        generate_cmd->add_flag("--verbose", options.verbose,
+                               "Enable verbose output");
 
-        app.add_flag("--verbose", options.verbose,
-                     "Enable verbose output");
+        // Validate 子命令
+        auto* validate_cmd = app.add_subcommand("validate", "Validate configuration file only");
+        validate_cmd->add_option("config", options.config_file, "JSON configuration file")
+                    ->required()
+                    ->check(::CLI::ExistingFile);
 
-        app.add_flag("-f,--force", options.force_overwrite,
-                     "Force overwrite existing files without confirmation");
+        validate_cmd->add_flag("--verbose", options.verbose,
+                               "Enable verbose output");
 
+        // 全局选项
         app.add_flag("--version", "Print version information");
 
         // 解析参数
@@ -49,11 +61,19 @@ namespace rplc
                 return std::nullopt;
             }
 
-            // 检查配置文件是否提供
-            if (options.config_file.empty())
+            // 判断使用哪个子命令
+            if (generate_cmd->parsed())
             {
-                fmt::print(stderr, "Error: configuration file is required\n");
-                print_usage();
+                options.subcommand = SubCommand::GENERATE;
+            }
+            else if (validate_cmd->parsed())
+            {
+                options.subcommand = SubCommand::VALIDATE;
+            }
+            else
+            {
+                // 没有子命令，打印帮助信息
+                fmt::print("{}\n", app.help());
                 return std::nullopt;
             }
 
@@ -76,7 +96,7 @@ namespace rplc
         }
 
         // 仅验证模式
-        if (options.validate_only)
+        if (options.subcommand == SubCommand::VALIDATE)
         {
             return validate_config(options.config_file, options.verbose);
         }
@@ -87,27 +107,32 @@ namespace rplc
 
     void CLI::print_version()
     {
-        fmt::print("RPLC (RPL Packet Compiler) version 0.1.0\n");
+        fmt::print("RPLC (RPL Packet Compiler) version {}\n", VERSION);
     }
 
     void CLI::print_usage()
     {
-        fmt::print("Usage: rplc <config_file> [options]\n\n");
-        fmt::print("Arguments:\n");
-        fmt::print("  config_file              JSON configuration file\n\n");
-        fmt::print("Options:\n");
-        fmt::print("  -o, --output FILE        Output file path (default: <packet_name>.hpp)\n");
-        fmt::print("  -v, --validate           Validate configuration only\n");
+        fmt::print("Usage: rplc <subcommand> [options]\n\n");
+        fmt::print("Subcommands:\n");
+        fmt::print("  generate <config>        Generate packet header file from configuration\n");
+        fmt::print("  validate <config>        Validate configuration file only\n\n");
+        fmt::print("Generate Options:\n");
+        fmt::print(
+            "  -o, --output PATH        Output file path OR directory (default: <config_name>.hpp next to config file)\n");
         fmt::print("  -b, --backup             Create backup of existing files\n");
         fmt::print("  -f, --force              Force overwrite without confirmation\n");
-        fmt::print("      --verbose            Enable verbose output\n");
+        fmt::print("      --verbose            Enable verbose output\n\n");
+        fmt::print("Validate Options:\n");
+        fmt::print("      --verbose            Enable verbose output\n\n");
+        fmt::print("Global Options:\n");
         fmt::print("      --version            Print version information\n");
         fmt::print("  -h, --help               Print this help message\n\n");
         fmt::print("Examples:\n");
-        fmt::print("  rplc config.json                    Generate header file\n");
-        fmt::print("  rplc config.json --validate         Validate configuration only\n");
-        fmt::print("  rplc config.json -o MyPacket.hpp    Specify output file path\n");
-        fmt::print("  rplc config.json --backup --force   Backup and force overwrite\n");
+        fmt::print("  rplc generate TestPacket.json                        Generate ./TestPacket.hpp next to json\n");
+        fmt::print(
+            "  rplc generate TestPacket.json -o ./include/          Put into directory ./include as ./include/TestPacket.hpp\n");
+        fmt::print("  rplc generate TestPacket.json -o ./include/Test.hpp  Generate as ./include/Test.hpp\n");
+        fmt::print("  rplc validate TestPacket.json --verbose              Verbose validation output\n");
     }
 
     CLIResult CLI::validate_config(const std::string& config_file, bool verbose)
@@ -168,31 +193,68 @@ namespace rplc
             fmt::print("✓ Configuration is valid\n\n");
         }
 
+        // 计算默认文件名：以配置文件名为基准
+        const std::filesystem::path cfg_path(options.config_file);
+        const std::string default_filename = (cfg_path.stem().string() + ".hpp");
+
         // 确定输出路径
-        std::string output_path;
+        std::filesystem::path output_path;
         if (!options.output_path.empty())
         {
-            // 用户指定了输出路径
-            output_path = options.output_path;
-            if (options.verbose)
+            std::filesystem::path out_hint(options.output_path);
+
+            // 判断是否应作为目录对待：存在且为目录，或用户以/或\结尾
+            bool treat_as_dir = false;
+            try
             {
-                fmt::print("Using user-specified output path: {}\n", output_path);
+                treat_as_dir = std::filesystem::exists(out_hint) && std::filesystem::is_directory(out_hint);
+            }
+            catch (...)
+            {
+                treat_as_dir = false;
+            }
+            if (!treat_as_dir)
+            {
+                const char last = options.output_path.back();
+                if (last == '/' || last == '\\') treat_as_dir = true;
+            }
+
+            if (treat_as_dir)
+            {
+                output_path = out_hint / default_filename;
+                if (options.verbose)
+                {
+                    fmt::print("Using output directory hint: {} => {}\n", out_hint.string(), output_path.string());
+                }
+            }
+            else
+            {
+                output_path = out_hint; // 直接使用用户指定的文件路径
+                if (options.verbose)
+                {
+                    fmt::print("Using explicit output file path: {}\n", output_path.string());
+                }
             }
         }
         else
         {
-            // 使用默认路径：当前目录下的<packet_name>.hpp
-            output_path = generate_default_output_path(config->packet_name);
+            // 默认：与配置文件同目录，同名（.hpp扩展）
+            std::filesystem::path out_dir = cfg_path.parent_path();
+            if (out_dir.empty())
+            {
+                out_dir = std::filesystem::current_path();
+            }
+            output_path = out_dir / default_filename;
             if (options.verbose)
             {
-                fmt::print("Using default output path: {}\n", output_path);
+                fmt::print("Using default output path: {}\n", output_path.string());
             }
         }
 
         // 检查文件覆盖
-        if (FileWriter::file_exists(output_path))
+        if (FileWriter::file_exists(output_path.string()))
         {
-            if (!confirm_overwrite(output_path, options.force_overwrite))
+            if (!confirm_overwrite(output_path.string(), options.force_overwrite))
             {
                 fmt::print("Operation cancelled by user\n");
                 return CLIResult::SUCCESS;
@@ -200,7 +262,7 @@ namespace rplc
 
             if (options.backup_files)
             {
-                FileWriter::backup_file(output_path);
+                FileWriter::backup_file(output_path.string());
             }
         }
 
@@ -219,14 +281,14 @@ namespace rplc
             fmt::print("Code generation completed\n");
         }
 
-        // 写入文件
-        if (!FileWriter::write_file(output_path, *generated_code))
+        // 写入文件（需要创建目录）
+        if (!FileWriter::write_file(output_path.string(), *generated_code, /*create_directories=*/true))
         {
             fmt::print(stderr, "Failed to write output file\n");
             return CLIResult::OUTPUT_FAILED;
         }
 
-        fmt::print("✓ Successfully generated: {}\n", output_path);
+        fmt::print("✓ Successfully generated: {}\n", output_path.string());
         return CLIResult::SUCCESS;
     }
 

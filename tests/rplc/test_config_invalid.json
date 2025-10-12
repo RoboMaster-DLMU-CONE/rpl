@@ -3,9 +3,7 @@
   "command_id": "999999",
   "namespace": "invalid::name space",
   "packed": true,
-  "output": {
-    "header_file": "test.txt"
-  },
+  "header_guard": "RPL_TESTPACKET_HPP",
   "fields": [
     {
       "name": "class",

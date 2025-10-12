@@ -4,6 +4,8 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(FetchContent)
 
+set(RPL_VERSION 0.1.1)
+set(RPLC_VERSION 0.1.2)
 option(BUILD_RPL_BENCHMARK "Enable building RPL Benchmark" OFF)
 option(BUILD_RPL_TESTS "Enable building RPL Tests" OFF)
 option(BUILD_RPLC "Enable build RPLC" OFF)
@@ -32,7 +34,7 @@ endif ()
 
 # CPack configuration based on what is being built
 include(InstallRequiredSystemLibraries)
-set(CPACK_PACKAGE_VENDOR "TeamCONE")
+set(CPACK_PACKAGE_VENDOR "C-One-Studio")
 set(CPACK_PACKAGE_CONTACT "MoonFeather <moonfeather120@outlook.com>")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
