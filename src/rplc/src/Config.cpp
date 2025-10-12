@@ -73,22 +73,9 @@ namespace rplc
             {
                 config.packed = j["packed"].get<bool>();
             }
-
-            // 解析输出配置（可选）
-            if (j.contains("output") && j["output"].is_object())
+            if (j.contains("header_guard") && !j["header_guard"].is_null())
             {
-                auto output = parse_output(j["output"]);
-                if (!output)
-                {
-                    return std::nullopt;
-                }
-                config.output = *output;
-            }
-            else
-            {
-                // 默认输出配置
-                config.output.header_file = ""; // 不再从配置决定输出路径
-                config.output.header_guard = std::nullopt;
+                config.header_guard = j["header_guard"].get<std::string>();
             }
 
             // 解析字段
@@ -146,27 +133,5 @@ namespace rplc
         }
 
         return fields;
-    }
-
-    std::optional<OutputConfig> ConfigLoader::parse_output(const nlohmann::json& j)
-    {
-        OutputConfig output;
-
-        // header_file 变为可选；缺省时设为空字符串
-        if (j.contains("header_file") && !j["header_file"].is_null())
-        {
-            output.header_file = j["header_file"].get<std::string>();
-        }
-        else
-        {
-            output.header_file = "";
-        }
-
-        if (j.contains("header_guard") && !j["header_guard"].is_null())
-        {
-            output.header_guard = j["header_guard"].get<std::string>();
-        }
-
-        return output;
     }
 } // namespace rplc

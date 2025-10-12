@@ -45,14 +45,14 @@ namespace rplc
 
     std::string PacketHeaderGenerator::generate_header_guard(const PacketConfig& config) const
     {
-        if (config.output.header_guard)
+        if (config.header_guard)
         {
-            return *config.output.header_guard;
+            return *config.header_guard;
         }
 
         // 自动生成头文件保护宏：RPL_PACKETNAME_HPP
         std::string guard = "RPL_" + config.packet_name + "_HPP";
-        std::transform(guard.begin(), guard.end(), guard.begin(), ::toupper);
+        std::ranges::transform(guard, guard.begin(), ::toupper);
         return guard;
     }
 

@@ -13,8 +13,8 @@ namespace rplc
         validate_packet_name(config.packet_name, result);
         validate_command_id(config.command_id, result);
         validate_namespace(config.name_space, result);
+        validate_header_guard(config.header_guard, result);
         validate_fields(config.fields, result);
-        validate_output(config.output, result);
 
         return result;
     }
@@ -84,6 +84,29 @@ namespace rplc
         }
     }
 
+    void Validator::validate_header_guard(const std::optional<std::string>& hg, ValidationResult& result)
+    {
+        if (!hg || !hg->empty()) return;
+        // 验证头文件保护宏
+
+        const std::string& guard = *hg;
+        if (!is_valid_identifier(guard))
+        {
+            result.add_error(fmt::format("Invalid header guard '{}': must be a valid C++ identifier", guard));
+        }
+
+        // 建议使用大写
+        const bool all_upper = std::ranges::all_of(guard, [](const char c)
+        {
+            return std::isupper(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c
+                == '_';
+        });
+        if (!all_upper)
+        {
+            result.add_warning("Header guard should typically be in UPPERCASE");
+        }
+    }
+
     void Validator::validate_fields(const std::vector<Field>& fields, ValidationResult& result)
     {
         if (fields.empty())
@@ -136,47 +159,6 @@ namespace rplc
         else if (!is_supported_type(field.type))
         {
             result.add_error(fmt::format("Unsupported field type '{}' for field '{}'", field.type, field.name));
-        }
-    }
-
-    void Validator::validate_output(const OutputConfig& output, ValidationResult& result)
-    {
-        // header_file 现在是可选的：不提供则使用CLI默认行为
-        if (!output.header_file.empty())
-        {
-            // 检查文件扩展名
-            if (!output.header_file.ends_with(".hpp") && !output.header_file.ends_with(".h"))
-            {
-                result.add_warning("Header file should have .hpp or .h extension");
-            }
-
-            // 建议使用正斜杠
-            if (output.header_file.find('\\') != std::string::npos)
-            {
-                result.add_warning(
-                    "Consider using forward slashes (/) in header file path for better cross-platform compatibility");
-            }
-        }
-
-        // 验证头文件保护宏
-        if (output.header_guard && !output.header_guard->empty())
-        {
-            const std::string& guard = *output.header_guard;
-            if (!is_valid_identifier(guard))
-            {
-                result.add_error(fmt::format("Invalid header guard '{}': must be a valid C++ identifier", guard));
-            }
-
-            // 建议使用大写
-            bool all_upper = std::all_of(guard.begin(), guard.end(), [](char c)
-            {
-                return std::isupper(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c
-                    == '_';
-            });
-            if (!all_upper)
-            {
-                result.add_warning("Header guard should typically be in UPPERCASE");
-            }
         }
     }
 
