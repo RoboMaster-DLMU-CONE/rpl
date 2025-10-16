@@ -1,0 +1,64 @@
+name: Release RPL (library)
+on:
+  push:
+    tags:
+      - 'rpl-v*'
+  workflow_dispatch: { }
+
+jobs:
+  package-rpl:
+    permissions:
+      contents: write
+    name: Build and Package RPL Library
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential dpkg-dev rpm
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Configure Project
+        run: |
+          cmake -S . -B build -G Ninja -DBUILD_RPL_LIBRARY=ON
+
+      - name: Build Project
+        run: |
+          cmake --build build
+
+      - name: Generate Packages
+        run: |
+          cd build
+          cpack -G TGZ
+          cpack -G ZIP
+          cpack -G DEB
+          cpack -G RPM
+
+      - name: List Generated Packages
+        run: |
+          ls -lh build/rpl-*
+
+      - name: Upload Packages as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpl-packages
+          path: build/rpl-*.*
+          retention-days: 90
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            build/rpl-*.tar.gz
+            build/rpl-*.zip
+            build/rpl-*.deb
+            build/rpl-*.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
