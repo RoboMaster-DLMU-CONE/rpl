@@ -35,14 +35,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Project
-        run: |
-          cmake -S . -B build ${{ steps.vcpkg.outputs.vcpkg-cmake-config }} \
-            -DBUILD_RPLC=ON \
-            -DBUILD_RPL_LIBRARY=OFF \
-            -DBUILD_RPL_BENCHMARK=OFF \
-            -DBUILD_RPL_TESTS=OFF \
-            -DBUILD_RPL_SAMPLES=OFF \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        run: cmake ${{ steps.vcpkg.outputs.vcpkg-cmake-config }} \
+          -S . -B build \
+          -DBUILD_RPLC=ON \
+          -DBUILD_RPL_LIBRARY=OFF \
+          -DBUILD_RPL_BENCHMARK=OFF \
+          -DBUILD_RPL_TESTS=OFF \
+          -DBUILD_RPL_SAMPLES=OFF \
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
       - name: Build Project
         run: cmake --build build --config Release
