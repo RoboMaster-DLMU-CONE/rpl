@@ -1,5 +1,5 @@
 find_package(tl-expected CONFIG QUIET)
-if (NOT tl-expected_FOUND)
+if (NOT tl-expected_FOUND AND NOT TARGET expected)
     set(EXPECTED_BUILD_PACKAGE OFF)
     set(EXPECTED_BUILD_TESTS OFF)
     set(EXPECTED_BUILD_PACKAGE_DEB OFF)
