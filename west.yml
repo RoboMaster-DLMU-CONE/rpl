@@ -1,0 +1,23 @@
+manifest:
+  version: "1.2"
+
+  defaults:
+    remote: origin
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: origin
+      url-base: https://github.com/RoboMaster-DLMU-CONE
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+    - name: rpl
+      repo-path: rpl
+      path: modules/lib/rpl
+      revision: main
+
+  self:
+    path: modules/lib/rpl

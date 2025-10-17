@@ -1,0 +1,10 @@
+config RPL
+    bool "RoboMaster Packet Library support"
+    select CPP
+    select REQUIRES_FULL_LIBCPP
+    help
+      Enable RoboMaster Packet Library for multi-platform communication.
+
+if RPL
+
+endif # RPL
