@@ -1,5 +1,3 @@
-# RPL Tests CMakeLists.txt
-
 # Include test framework setup
 include(CTest)
 

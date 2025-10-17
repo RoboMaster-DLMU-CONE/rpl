@@ -1,7 +1,4 @@
-include(FindTl-expected)
-include(FindCppcrc)
-include(FindFrozen)
-
+include(FindRplModules)
 add_library(rpl INTERFACE)
 add_library(rpl::rpl ALIAS rpl)
 
@@ -12,6 +9,13 @@ target_include_directories(rpl INTERFACE
         $<INSTALL_INTERFACE:include>
 )
 
+if (ZEPHYR_TOOLCHAIN_VARIANT AND CONFIG_RPL STREQUAL "y")
+    zephyr_include_directories(${PROJECT_SOURCE_DIR}/include)
+    zephyr_include_directories(${cppcrc_SOURCE_DIR})
+    zephyr_include_directories(${frozen_SOURCE_DIR}/include)
+    zephyr_include_directories(${tl-expected_SOURCE_DIR}/include)
+endif ()
+
 target_link_libraries(rpl INTERFACE
         tl::expected
         frozen
@@ -21,8 +25,7 @@ target_compile_definitions(rpl INTERFACE
         FRAME_HEADER_TAG=${FRAME_HEADER_TAG}
 )
 
-# Only install RPL library components when building the library package
-if (BUILD_RPL_LIBRARY)
+if (NOT ZEPHYR_TOOLCHAIN_VARIANT)
     # Install RPL library headers
     install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/RPL
             DESTINATION include

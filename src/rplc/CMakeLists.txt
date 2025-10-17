@@ -1,6 +1,4 @@
-include(FindCli11)
-include(FindFmt)
-include(FindJson)
+include(FindRplcModules)
 
 add_executable(rplc
         main.cpp

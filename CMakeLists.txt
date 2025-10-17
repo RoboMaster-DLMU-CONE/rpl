@@ -23,7 +23,7 @@ if (BUILD_RPL_SAMPLES)
 endif ()
 
 if (BUILD_RPL_BENCHMARK)
-    include(FindGoogleBenchmark)
+    include(Modules/FindGoogleBenchmark)
     add_subdirectory(${PROJECT_SOURCE_DIR}/benchmark)
 endif ()
 
