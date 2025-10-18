@@ -11,9 +11,30 @@ target_include_directories(rpl INTERFACE
 
 if (ZEPHYR_TOOLCHAIN_VARIANT AND CONFIG_RPL STREQUAL "y")
     zephyr_include_directories(${PROJECT_SOURCE_DIR}/include)
-    zephyr_include_directories(${cppcrc_SOURCE_DIR})
-    zephyr_include_directories(${frozen_SOURCE_DIR}/include)
-    zephyr_include_directories(${tl-expected_SOURCE_DIR}/include)
+
+    # Handle cppcrc include directory
+    if(DEFINED cppcrc_SOURCE_DIR)
+        zephyr_include_directories(${cppcrc_SOURCE_DIR})
+    endif()
+
+    if(DEFINED frozen_SOURCE_DIR)
+        zephyr_include_directories(${frozen_SOURCE_DIR}/include)
+    elseif(TARGET frozen::frozen)
+        get_target_property(frozen_includes frozen::frozen INTERFACE_INCLUDE_DIRECTORIES)
+        if(frozen_includes)
+            zephyr_include_directories(${frozen_includes})
+        endif()
+    endif()
+
+    # Handle tl-expected include directory
+    if(DEFINED tl-expected_SOURCE_DIR)
+        zephyr_include_directories(${tl-expected_SOURCE_DIR}/include)
+    elseif(TARGET tl::expected)
+        get_target_property(expected_includes tl::expected INTERFACE_INCLUDE_DIRECTORIES)
+        if(expected_includes)
+            zephyr_include_directories(${expected_includes})
+        endif()
+    endif()
 endif ()
 
 target_link_libraries(rpl INTERFACE
