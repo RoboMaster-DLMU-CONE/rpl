@@ -87,8 +87,6 @@ namespace RPL
             ringbuffer.clear();
         }
 
-    private:
-        // 优化的快速解析路径
         tl::expected<void, Error> try_parse_packets()
         {
             // 获取缓冲区状态
@@ -229,6 +227,7 @@ namespace RPL
             return {};
         }
 
+    private:
         // 慢速路径：当数据包不连续时，拷贝到临时缓冲区进行处理
         tl::expected<void, Error> parse_with_copy()
         {

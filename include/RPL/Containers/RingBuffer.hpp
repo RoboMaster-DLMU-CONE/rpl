@@ -109,20 +109,17 @@ namespace RPL::Containers
                 const void* found = std::memchr(buffer + current_read, byte, available_data);
                 return found ? static_cast<const uint8_t*>(found) - (buffer + current_read) : SIZE_MAX;
             }
-            else
+            // 数据分为两段
+            const size_t first_part_size = SIZE - current_read;
+            const void* found = std::memchr(buffer + current_read, byte, first_part_size);
+            if (found)
             {
-                // 数据分为两段
-                const size_t first_part_size = SIZE - current_read;
-                const void* found = std::memchr(buffer + current_read, byte, first_part_size);
-                if (found)
-                {
-                    return static_cast<const uint8_t*>(found) - (buffer + current_read);
-                }
-
-                // 在第二段中查找
-                found = std::memchr(buffer, byte, current_write);
-                return found ? first_part_size + (static_cast<const uint8_t*>(found) - buffer) : SIZE_MAX;
+                return static_cast<const uint8_t*>(found) - (buffer + current_read);
             }
+
+            // 在第二段中查找
+            found = std::memchr(buffer, byte, current_write);
+            return found ? first_part_size + (static_cast<const uint8_t*>(found) - buffer) : SIZE_MAX;
         }
 
         // 丢弃指定数量的字节
@@ -143,10 +140,7 @@ namespace RPL::Containers
             {
                 return {buffer + current_read_pos, current_write_pos - current_read_pos};
             }
-            else
-            {
-                return {buffer + current_read_pos, SIZE - current_read_pos};
-            }
+            return {buffer + current_read_pos, SIZE - current_read_pos};
         }
 
         // 获取可用数据量
