@@ -25,8 +25,8 @@ namespace RPL
         // 序列化数据包到用户提供的缓冲区
         template <typename... Packets>
             requires (Serializable<Packets, Ts...> && ...)
-        tl::expected<size_t, Error> serialize(uint8_t* buffer, const size_t size, const uint8_t sequence_number,
-                                              const Packets&... packets) const
+        tl::expected<size_t, Error> serialize(uint8_t* buffer, const size_t size,
+                                              const Packets&... packets)
         {
             size_t offset = 0;
 
@@ -47,7 +47,7 @@ namespace RPL
                 current_buffer[0] = FRAME_START_BYTE;
                 *reinterpret_cast<uint16_t*>(current_buffer + 1) = cmd;
                 *reinterpret_cast<uint16_t*>(current_buffer + 3) = static_cast<uint16_t>(data_size);
-                current_buffer[5] = sequence_number;
+                current_buffer[5] = m_Sequence;
 
                 const uint8_t header_crc8 = CRC8::CRC8::calc(current_buffer, 6);
                 current_buffer[6] = header_crc8;
@@ -60,6 +60,7 @@ namespace RPL
             };
             (serialize_one(packets), ...);
 
+            m_Sequence += 1;
             return offset;
         }
 
@@ -133,6 +134,14 @@ namespace RPL
                     return std::nullopt;
                 }
             }
+        }
+
+        uint8_t m_Sequence{};
+
+    public:
+        [[nodiscard]] uint8_t get_sequence() const
+        {
+            return m_Sequence;
         }
     };
 }

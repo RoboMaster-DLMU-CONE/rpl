@@ -83,7 +83,7 @@ int main()
         SampleA, SampleB>::frame_size<SampleB>();
     std::vector<uint8_t> buffer(total_frame_size);
 
-    auto serialize_result = serializer.serialize(buffer.data(), buffer.size(), 1, original_packet_a, original_packet_b);
+    auto serialize_result = serializer.serialize(buffer.data(), buffer.size(), original_packet_a, original_packet_b);
     if (serialize_result)
     {
         std::cout << "  Serialization successful, total frame size: " << *serialize_result << " bytes" << std::endl;

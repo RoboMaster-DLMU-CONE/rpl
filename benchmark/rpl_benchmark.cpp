@@ -14,14 +14,14 @@ using PacketB = SampleB;
 
 static void BM_Serialization_SinglePacket(benchmark::State& state)
 {
-    RPL::Serializer < PacketA, PacketB > serializer;
+    RPL::Serializer<PacketA, PacketB> serializer;
     PacketA packet_a{42, -1234, 3.14f, 2.718};
     constexpr size_t frame_size = RPL::Serializer<PacketA>::frame_size<PacketA>();
     std::vector<uint8_t> buffer(frame_size);
 
     for (auto _ : state)
     {
-        auto result = serializer.serialize(buffer.data(), buffer.size(), 1, packet_a);
+        auto result = serializer.serialize(buffer.data(), buffer.size(), packet_a);
         benchmark::DoNotOptimize(result);
     }
 }
@@ -30,7 +30,7 @@ BENCHMARK(BM_Serialization_SinglePacket);
 
 static void BM_Serialization_MultiPacket(benchmark::State& state)
 {
-    RPL::Serializer < PacketA, PacketB > serializer;
+    RPL::Serializer<PacketA, PacketB> serializer;
     PacketA packet_a{42, -1234, 3.14f, 2.718};
     PacketB packet_b{1337, 9.876};
     constexpr size_t total_size = RPL::Serializer<PacketA, PacketB>::frame_size<PacketA>() + RPL::Serializer<
@@ -39,7 +39,7 @@ static void BM_Serialization_MultiPacket(benchmark::State& state)
 
     for (auto _ : state)
     {
-        auto result = serializer.serialize(buffer.data(), buffer.size(), 1, packet_a, packet_b);
+        auto result = serializer.serialize(buffer.data(), buffer.size(), packet_a, packet_b);
         benchmark::DoNotOptimize(result);
     }
 }
@@ -51,7 +51,7 @@ BENCHMARK(BM_Serialization_MultiPacket);
 
 static void BM_Deserialization_GetPacket(benchmark::State& state)
 {
-    RPL::Deserializer < PacketA, PacketB > deserializer;
+    RPL::Deserializer<PacketA, PacketB> deserializer;
     // Pre-fill the memory pool for a realistic get scenario
     auto& raw_ref_a = deserializer.getRawRef<PacketA>();
     raw_ref_a = {42, -1234, 3.14f, 2.718};
@@ -87,12 +87,12 @@ public:
         // Prepare single packet buffer
         constexpr size_t frame_size_a = RPL::Serializer<PacketA, PacketB>::frame_size<PacketA>();
         single_packet_buffer.resize(frame_size_a);
-        (void)serializer.serialize(single_packet_buffer.data(), single_packet_buffer.size(), 1, packet_a);
+        (void)serializer.serialize(single_packet_buffer.data(), single_packet_buffer.size(), packet_a);
 
         // Prepare multi-packet buffer
         constexpr size_t frame_size_b = RPL::Serializer<PacketA, PacketB>::frame_size<PacketB>();
         multi_packet_buffer.resize(frame_size_a + frame_size_b);
-        (void)serializer.serialize(multi_packet_buffer.data(), multi_packet_buffer.size(), 1, packet_a, packet_b);
+        (void)serializer.serialize(multi_packet_buffer.data(), multi_packet_buffer.size(), packet_a, packet_b);
 
         // Prepare noisy buffer (some garbage at the beginning)
         std::vector<uint8_t> garbage(50, 0xAB);
