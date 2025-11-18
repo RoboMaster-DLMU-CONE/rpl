@@ -45,8 +45,17 @@ namespace RPL
 
                 uint8_t* current_buffer = buffer + offset;
                 current_buffer[0] = FRAME_START_BYTE;
-                *reinterpret_cast<uint16_t*>(current_buffer + 1) = cmd;
-                *reinterpret_cast<uint16_t*>(current_buffer + 3) = static_cast<uint16_t>(data_size);
+
+                // cmd
+                current_buffer[1] = static_cast<uint8_t>(cmd & 0xFF);
+                current_buffer[2] = static_cast<uint8_t>((cmd >> 8) & 0xFF);
+
+                // data size
+                const auto data_size_u16 = static_cast<uint16_t>(data_size);
+                current_buffer[3] = static_cast<uint8_t>(data_size_u16 & 0xFF);
+                current_buffer[4] = static_cast<uint8_t>((data_size_u16 >> 8) & 0xFF);
+
+                // seq
                 current_buffer[5] = m_Sequence;
 
                 const uint8_t header_crc8 = CRC8::CRC8::calc(current_buffer, 6);
@@ -54,7 +63,8 @@ namespace RPL
                 std::memcpy(current_buffer + FRAME_HEADER_SIZE, &packet, data_size);
 
                 const uint16_t frame_crc16 = CRC16::CCITT_FALSE::calc(current_buffer, FRAME_HEADER_SIZE + data_size);
-                *reinterpret_cast<uint16_t*>(current_buffer + FRAME_HEADER_SIZE + data_size) = frame_crc16;
+                current_buffer[FRAME_HEADER_SIZE + data_size] = static_cast<uint8_t>(frame_crc16 & 0xFF);
+                current_buffer[FRAME_HEADER_SIZE + data_size + 1] = static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
 
                 offset += current_frame_size;
             };
