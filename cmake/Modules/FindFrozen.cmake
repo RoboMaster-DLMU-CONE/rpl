@@ -1,7 +1,11 @@
-FetchContent_Declare(
-        frozen
-        GIT_REPOSITORY https://github.com/serge-sans-paille/frozen
-        GIT_TAG master
-)
+find_package(frozen QUIET)
 
-FetchContent_MakeAvailable(frozen)
+if (NOT frozen_FOUND)
+    FetchContent_Declare(
+            frozen
+            GIT_REPOSITORY https://gitee.com/dlmu-cone/frozen
+            GIT_TAG master
+    )
+
+    FetchContent_MakeAvailable(frozen)
+endif ()

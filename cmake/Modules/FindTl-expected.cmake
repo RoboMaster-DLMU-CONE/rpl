@@ -1,4 +1,3 @@
-include(FetchContent)
 find_package(tl-expected QUIET)
 if (NOT tl-expected_FOUND AND NOT TARGET expected)
     cmake_policy(PUSH)
