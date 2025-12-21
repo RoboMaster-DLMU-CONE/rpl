@@ -1,11 +1,10 @@
-# RPL 和 RPLC 打包指南
+# RPL 打包指南
 
-本项目现在支持将 **RPL 库**（header-only）和 **RPLC 工具**（命令行工具）分别打包为不同的安装包。
+本项目支持将 **RPL 库**（header-only）打包为安装包。
 
 ## 项目结构
 
 - **RPL** - RoboMaster 数据包序列化/反序列化库（header-only C++20 库）
-- **RPLC** - RPL 命令行工具，用于解析 JSON 并转换为 RPL 包格式
 
 ## 打包 RPL 库（开发包）
 
@@ -17,8 +16,8 @@ RPL 是一个 header-only 库，打包后供其他开发者在项目中使用。
 # 清理并创建构建目录
 rm -rf build && mkdir build && cd build
 
-# 配置项目（不构建 RPLC）
-cmake .. -DBUILD_RPLC=OFF
+# 配置项目
+cmake ..
 
 # 构建
 make -j$(nproc)
@@ -56,66 +55,6 @@ target_link_libraries(your_target PRIVATE rpl::rpl)
 
 ---
 
-## 打包 RPLC 工具（可执行程序）
-
-RPLC 是一个命令行工具，打包后供最终用户直接使用。
-
-### 构建和打包步骤
-
-```bash
-# 清理并创建构建目录
-rm -rf build && mkdir build && cd build
-
-# 配置项目（构建 RPLC）
-cmake .. -DBUILD_RPLC=ON
-
-# 构建
-make -j$(nproc)
-
-# 生成不同格式的安装包
-cpack -G TGZ    # 生成 .tar.gz 包
-cpack -G ZIP    # 生成 .zip 包
-cpack -G DEB    # 生成 .deb 包（需要 dpkg-dev）
-cpack -G RPM    # 生成 .rpm 包（需要 rpmbuild）
-cpack -G WIX    # 生成 .msi 安装程序（仅 Windows，需要 WiX Toolset）
-```
-
-### RPLC 工具包内容
-
-- **可执行文件**: `bin/rplc`
-- **包名称**: `rplc`
-- **分类**: Debian (utils) / RPM (Development/Tools)
-
-### 使用已安装的 RPLC 工具
-
-安装后，直接在命令行使用：
-
-```bash
-rplc --help
-```
-
----
-
-## Windows 平台打包（RPLC）
-
-在 Windows 上生成 WiX 安装程序：
-
-```bash
-# 使用 Visual Studio 生成器
-cmake .. -G "Visual Studio 17 2022" -DBUILD_RPLC=ON
-
-# 构建 Release 版本
-cmake --build . --config Release
-
-# 生成 WiX 安装程序（需要先安装 WiX Toolset）
-cpack -C Release -G WIX
-```
-
-这会生成一个 `rplc-0.1.1-win64.msi` 安装程序，支持：
-
-- 自动添加到系统 PATH（无长度限制）
-- 标准的 Windows 安装向导
-- 升级和卸载功能
 
 ---
 
@@ -128,13 +67,6 @@ cpack -C Release -G WIX
 - ✅ **DEB** (.deb) - Debian/Ubuntu 包
 - ✅ **RPM** (.rpm) - RedHat/Fedora/CentOS 包
 
-### RPLC 工具包格式
-
-- ✅ **TGZ** (.tar.gz) - 通用压缩包
-- ✅ **ZIP** (.zip) - 通用压缩包
-- ✅ **DEB** (.deb) - Debian/Ubuntu 包
-- ✅ **RPM** (.rpm) - RedHat/Fedora/CentOS 包
-- ✅ **WiX** (.msi) - Windows 安装程序
 
 ---
 
@@ -175,8 +107,6 @@ sudo apt-get install dpkg-dev rpm
 1. **创建版本标签** - 推送符合 `v*` 格式的标签（如 `v0.1.0`）
 2. **手动触发** - 在 GitHub Actions 界面手动运行相应的工作流：
    - "Package RPL" - RPL 库打包
-   - "Package RPLC for Linux" - RPLC Linux 打包
-   - "Package RPL" - RPLC Windows 打包（包含在 Package RPL 工作流中）
 
 ### 自动生成的包
 
@@ -187,16 +117,6 @@ sudo apt-get install dpkg-dev rpm
 - `rpl-{version}-Linux.zip` - ZIP 压缩包
 - `rpl-{version}-Linux.deb` - Debian/Ubuntu 包
 - `rpl-{version}-Linux.rpm` - RPM 包
-
-**RPLC 工具包（Linux）:**
-- `rplc-{version}-Linux.tar.gz` - TGZ 压缩包
-- `rplc-{version}-Linux.zip` - ZIP 压缩包
-- `rplc-{version}-Linux.deb` - Debian/Ubuntu 包
-- `rplc-{version}-Linux.rpm` - RPM 包
-
-**RPLC 工具包（Windows）:**
-- `rplc-{version}-win64.msi` - WiX 安装程序（自动添加到 PATH，无长度限制）
-- `rplc-{version}-win64.zip` - 单独的可执行文件压缩包
 
 ### 包的获取
 

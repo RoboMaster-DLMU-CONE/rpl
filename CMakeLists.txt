@@ -3,10 +3,8 @@ project(rpl VERSION 0.1.1)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 set(RPL_VERSION 0.1.1)
-set(RPLC_VERSION 0.1.2)
 option(BUILD_RPL_BENCHMARK "Enable building RPL Benchmark" OFF)
 option(BUILD_RPL_TESTS "Enable building RPL Tests" OFF)
-option(BUILD_RPLC "Enable build RPLC" OFF)
 option(BUILD_RPL_LIBRARY "Enable build RPL Library" ON)
 option(BUILD_RPL_SAMPLES "Enable building RPL Samples" OFF)
 
@@ -17,17 +15,17 @@ set(FRAME_HEADER_TAG "0xA5")
 add_subdirectory(src)
 
 if (BUILD_RPL_SAMPLES)
-    add_subdirectory(samples)
+  add_subdirectory(samples)
 endif ()
 
 if (BUILD_RPL_BENCHMARK)
-    include(Modules/FindGoogleBenchmark)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/benchmark)
+  include(Modules/FindGoogleBenchmark)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/benchmark)
 endif ()
 
 if (BUILD_RPL_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
+  enable_testing()
+  add_subdirectory(tests)
 endif ()
 
 # CPack configuration based on what is being built
@@ -37,10 +35,6 @@ set(CPACK_PACKAGE_CONTACT "MoonFeather <moonfeather120@outlook.com>")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
-if (BUILD_RPLC)
-    include(RplcPackaging)
-else ()
-    include(RplPackaging)
-endif ()
+include(RplPackaging)
 
 include(CPack)
