@@ -1,0 +1,38 @@
+name: Documentation
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  DOXYGEN_VERSION: 1.13.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          wget --no-verbose "https://github.com/doxygen/doxygen/releases/download/Release_1_13_2/doxygen-1.13.2.linux.bin.tar.gz"
+          tar xf doxygen-1.13.2.linux.bin.tar.gz
+          echo "${PWD}/doxygen-1.13.2/bin" >> $GITHUB_PATH
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+
+      - name: Build
+        run: |
+          cd docs
+          doxygen
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config docs/wrangler-docs.toml
+
+
