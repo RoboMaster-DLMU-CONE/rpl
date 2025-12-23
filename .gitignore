@@ -3,3 +3,4 @@ build
 .idea
 .cache
 compile_commands.json
+docs/out
