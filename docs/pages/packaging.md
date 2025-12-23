@@ -1,7 +1,10 @@
-# RPL 打包指南
-
+\page packaging 打包指南
 
 RPL 是一个 header-only 库，可以在打包后供其他开发者在项目中使用。
+
+## 预构建包
+
+前往[Github Release]("https://github.com/RoboMaster-DLMU-CONE/rpl/releases/latest")下载
 
 ## 构建和打包步骤
 
@@ -45,5 +48,3 @@ target_link_libraries(your_target PRIVATE rpl::rpl)
 - ringbuffer (RPL 内部实现，已包含)
 
 不需要手动安装任何额外依赖。
-
-

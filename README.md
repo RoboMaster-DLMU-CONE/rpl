@@ -85,6 +85,14 @@ make -j$(nproc)
 ctest --output-on-failure
 ```
 
+## 文档
+
+详细文档请访问 [RPL 文档中心](https://rpl.doc.cone.team/)。
+
+- [快速入门](https://rpl.doc.cone.team/quick_start)
+- [集成指南](https://rpl.doc.cone.team/integration_guide)
+- [打包指南](https://rpl.doc.cone.team/packaging)
+
 ## 目录结构
 ```
 /

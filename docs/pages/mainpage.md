@@ -2,17 +2,19 @@
 
 ## 简介
 
-OneMotor是大连民族大学C·One战队研发的C++电机驱动库，致力于更高效、更便捷、更通用地控制电机。目前该库尚在早期研发阶段。
+RPL (RoboMaster Packet Library) 是大连民族大学 C·One 战队研发的高性能 C++20 数据包序列化/反序列化库，专为嵌入式通信场景设计。
 
-## 特点
+## 核心特性
 
-- 比赛常用电机（DJI M3508、DM J4310）开箱即用
-- 多平台可用：
-    - 原生支持Linux
-    - 原生支持基于Zephyr或其它带线程模型的嵌入式RTOS
-    - 基于WSL在Windows上可用
-- 基于现代C++的高性能实现
+- **极致性能**: 反序列化 < 1ns，解析 ~350ns，序列化 ~15ns。
+- **真·零拷贝**: 支持 DMA 直接写入 RingBuffer，配合分段 CRC 计算，实现全链路零拷贝。
+- **安全可靠**: 自动处理非对齐访问，编译期类型检查，无异常设计。
+- **开箱即用**: 完美兼容 RoboMaster 裁判系统协议。
+- **图形化配置**: 提供 [在线生成器](https://rplc.cone.team) 快速生成代码。
 
-## 文档
+## 文档导航
 
-- \ref integration_guide "集成指南"
+- \ref quick_start "快速入门" : 5分钟跑通第一个 RPL 程序。
+- \ref integration_guide "集成指南" : 在 STM32、Linux、Zephyr 中集成 RPL。
+- \ref packaging "打包指南" : 如何打包和分发 RPL 库。
+
