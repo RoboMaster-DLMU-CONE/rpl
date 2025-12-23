@@ -26,7 +26,7 @@ namespace RPL::Containers
     template <typename Collector>
     struct MemoryPool
     {
-        static inline std::array<std::byte, Collector::totalSize> buffer{};  ///< 预分配的内存缓冲区
+        alignas(std::max_align_t) std::array<std::byte, Collector::totalSize> buffer{};  ///< 预分配的内存缓冲区
     };
 }
 

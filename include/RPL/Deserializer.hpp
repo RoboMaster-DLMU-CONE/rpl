@@ -48,7 +48,7 @@ public:
    */
   template <typename T>
     requires Deserializable<T, Ts...>
-  T get() const noexcept {
+  T get() noexcept {
     auto ptr = reinterpret_cast<uint8_t *>(
         &pool.buffer[Collector::template type_index<T>()]);
     Meta::PacketTraits<T>::before_get(ptr);
@@ -66,7 +66,7 @@ public:
    */
   template <typename T>
     requires Deserializable<T, Ts...>
-  constexpr T &getRawRef() const noexcept {
+  constexpr T &getRawRef() noexcept {
     return reinterpret_cast<T &>(
         pool.buffer[Collector::template type_index<T>()]);
   };
@@ -80,7 +80,7 @@ public:
    * @param cmd 命令码
    * @return 指向数据缓冲区的指针，如果命令码无效则返回nullptr
    */
-  [[nodiscard]] constexpr uint8_t *getWritePtr(uint16_t cmd) const noexcept {
+  [[nodiscard]] constexpr uint8_t *getWritePtr(uint16_t cmd) noexcept {
     return reinterpret_cast<uint8_t *>(&pool.buffer[Collector::cmd_index(cmd)]);
   }
 };
