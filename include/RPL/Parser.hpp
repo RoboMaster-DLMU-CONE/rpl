@@ -114,7 +114,8 @@ public:
    */
   tl::expected<void, Error> advance_write_index(size_t length) {
     if (!ringbuffer.advance_write_index(length)) {
-      return tl::unexpected(Error{ErrorCode::BufferOverflow, "Invalid advance length"});
+      return tl::unexpected(
+          Error{ErrorCode::BufferOverflow, "Invalid advance length"});
     }
     return try_parse_packets();
   }
@@ -208,19 +209,26 @@ public:
 
         // 尝试解析帧
         // 此时 ringbuffer 的 read_index 指向 FRAME_START_BYTE
-        bool result = parse_frame();
+        ParseResult result = parse_frame();
 
-        if (result) {
+        if (result == ParseResult::Success) {
           // 解析成功，parse_frame 内部已经丢弃了整个帧
           available_bytes = ringbuffer.available();
           // 重新获取 view，因为 read_index 变了
           break;
-        } else {
+        } else if (result == ParseResult::Failure) {
           // 解析失败（CRC错误或长度错误），丢弃1字节并继续搜索
           ringbuffer.discard(1);
           available_bytes--;
-          // 更新 scan_offset 继续在当前 view 中搜索（优化：避免重新获取 view）
+          // 更新 scan_offset 继续在当前 view 中搜索
           scan_offset = start_offset + 1;
+        } else {
+          // ParseResult::Incomplete
+          // 数据不足，停止解析，等待更多数据
+          // 注意：这里不能丢弃任何数据，也不能继续搜索
+          // 必须直接返回，因为 RingBuffer 是 FIFO
+          // 的，队头不完整无法处理后续数据
+          return {};
         }
       }
 
@@ -234,15 +242,17 @@ public:
   }
 
 private:
+  enum class ParseResult { Success, Failure, Incomplete };
+
   /**
    * @brief 解析单个帧
    *
    * 尝试从当前 read_index 解析一个完整的帧。
    * 处理了数据跨越 RingBuffer 边界的情况。
    *
-   * @return 解析成功返回 true，失败（数据不足、校验失败等）返回 false
+   * @return 解析结果状态
    */
-  bool parse_frame() {
+  ParseResult parse_frame() {
     // 1. 读取并验证帧头
     std::array<uint8_t, FRAME_HEADER_SIZE> header_buffer;
 
@@ -254,18 +264,16 @@ private:
       header_ptr = view.data();
     } else {
       // 慢速路径：帧头跨界
-      if (!ringbuffer.peek(header_buffer.data(), 0, FRAME_HEADER_SIZE))
-        return false;
       header_ptr = header_buffer.data();
     }
 
     // 验证帧头 CRC8
     if (header_ptr[0] != FRAME_START_BYTE)
-      return false;
+      return ParseResult::Failure;
 
     const uint8_t received_crc8 = header_ptr[6];
     if (CRC8::CRC8::calc(header_ptr, 6) != received_crc8)
-      return false;
+      return ParseResult::Failure;
 
     // 提取元数据
     uint16_t cmd;
@@ -280,12 +288,12 @@ private:
 
     // 检查长度
     if (data_length > max_frame_size - FRAME_HEADER_SIZE - FRAME_TAIL_SIZE)
-      return false;
+      return ParseResult::Failure;
 
     const size_t complete_frame_size =
         FRAME_HEADER_SIZE + data_length + FRAME_TAIL_SIZE;
     if (ringbuffer.available() < complete_frame_size)
-      return false; // 数据不足
+      return ParseResult::Incomplete; // 数据不足
 
     // 2. 验证 CRC16
     const size_t crc16_data_len = complete_frame_size - FRAME_TAIL_SIZE;
@@ -303,8 +311,6 @@ private:
       const size_t second_part_len = crc16_data_len - view.size();
       // 借用 parse_buffer 暂存第二段数据用于计算 CRC
       // 注意：这里假设 parse_buffer 足够大，max_frame_size 保证了这一点
-      if (!ringbuffer.peek(parse_buffer.data(), view.size(), second_part_len))
-        return false;
 
       calculated_crc16 = CRC16::CCITT_FALSE::calc(parse_buffer.data(),
                                                   second_part_len, crc_part1);
@@ -314,10 +320,10 @@ private:
     uint16_t received_crc16;
     if (!ringbuffer.peek(reinterpret_cast<uint8_t *>(&received_crc16),
                          crc16_data_len, sizeof(uint16_t)))
-      return false;
+      return ParseResult::Incomplete;
 
     if (calculated_crc16 != received_crc16)
-      return false;
+      return ParseResult::Failure;
 
     // 3. 提取数据
     ringbuffer.discard(FRAME_HEADER_SIZE);
@@ -330,7 +336,7 @@ private:
     }
 
     ringbuffer.discard(FRAME_TAIL_SIZE);
-    return true;
+    return ParseResult::Success;
   }
 
   /**
