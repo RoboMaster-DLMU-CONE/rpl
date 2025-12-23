@@ -21,7 +21,7 @@ namespace RPL::Meta {
 /**
  * @brief 编译期对齐计算辅助函数
  */
-consteval size_t align_up(size_t offset, size_t alignment) {
+constexpr size_t align_up(size_t offset, size_t alignment) {
   return (offset + alignment - 1) & ~(alignment - 1);
 }
 
@@ -34,6 +34,22 @@ consteval size_t align_up(size_t offset, size_t alignment) {
  */
 template <typename... Ts> struct PacketInfoCollector {
   /**
+   * @brief 递归计算偏移量的辅助函数
+   */
+  template <typename T, typename... Rest>
+  static constexpr void calculate_offsets(
+      std::array<size_t, sizeof...(Ts)> &offsets, size_t &current_offset,
+      size_t index) {
+    current_offset = align_up(current_offset, alignof(T));
+    offsets[index] = current_offset;
+    current_offset += sizeof(T);
+
+    if constexpr (sizeof...(Rest) > 0) {
+      calculate_offsets<Rest...>(offsets, current_offset, index + 1);
+    }
+  }
+
+  /**
    * @brief 计算所有数据包在内存池中的布局（考虑对齐）
    */
   static constexpr auto layout = []() {
@@ -43,14 +59,7 @@ template <typename... Ts> struct PacketInfoCollector {
     } info{};
 
     size_t current_offset = 0;
-    size_t index = 0;
-
-    // 使用折叠表达式计算每个包的偏移量
-    ((current_offset = align_up(current_offset, alignof(Ts)), // 对齐当前偏移
-      info.offsets[index++] = current_offset,                 // 记录偏移
-      current_offset += sizeof(Ts)                            // 增加大小
-      ),
-     ...);
+    calculate_offsets<Ts...>(info.offsets, current_offset, 0);
 
     info.total_size = current_offset;
     return info;
