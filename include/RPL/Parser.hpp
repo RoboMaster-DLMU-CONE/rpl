@@ -263,7 +263,10 @@ private:
     if (view.size() >= FRAME_HEADER_SIZE) {
       header_ptr = view.data();
     } else {
-      // 慢速路径：帧头跨界
+      // 慢速路径：帧头跨界，需要从 RingBuffer 读取到 header_buffer
+      if (!ringbuffer.peek(header_buffer.data(), 0, FRAME_HEADER_SIZE)) {
+        return ParseResult::Incomplete;
+      }
       header_ptr = header_buffer.data();
     }
 
@@ -307,10 +310,11 @@ private:
       // 第一段
       uint16_t crc_part1 = CRC16::CCITT_FALSE::calc(view.data(), view.size());
 
-      // 第二段
+      // 第二段：从 RingBuffer 读取跨界数据到 parse_buffer
       const size_t second_part_len = crc16_data_len - view.size();
-      // 借用 parse_buffer 暂存第二段数据用于计算 CRC
-      // 注意：这里假设 parse_buffer 足够大，max_frame_size 保证了这一点
+      if (!ringbuffer.peek(parse_buffer.data(), view.size(), second_part_len)) {
+        return ParseResult::Incomplete;
+      }
 
       calculated_crc16 = CRC16::CCITT_FALSE::calc(parse_buffer.data(),
                                                   second_part_len, crc_part1);
