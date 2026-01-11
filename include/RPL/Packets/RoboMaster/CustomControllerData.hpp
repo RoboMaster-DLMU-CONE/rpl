@@ -9,7 +9,7 @@
  */
 struct CustomControllerData
 {
-    uint8_t[30] data; ///< 自定义数据内容
+    uint8_t data[30]; ///< 自定义数据内容
 } __attribute__((packed));
 
 template <>
