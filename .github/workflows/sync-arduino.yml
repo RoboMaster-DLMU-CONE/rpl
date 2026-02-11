@@ -1,8 +1,9 @@
 name: Sync to Arduino Repo
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
