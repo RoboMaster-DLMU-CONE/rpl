@@ -11,7 +11,6 @@ option(BUILD_RPL_SAMPLES "Enable building RPL Samples" OFF)
 option(BUILD_RPL_DOC "Enable building RPL Document" OFF)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_CXX_STANDARD 20)
 set(FRAME_HEADER_TAG "0xA5")
 
 add_subdirectory(src)

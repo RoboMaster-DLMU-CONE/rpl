@@ -10,31 +10,31 @@ target_include_directories(rpl INTERFACE
 )
 
 if (ZEPHYR_TOOLCHAIN_VARIANT AND CONFIG_RPL STREQUAL "y")
-    zephyr_include_directories(${PROJECT_SOURCE_DIR}/include)
+  zephyr_include_directories(${PROJECT_SOURCE_DIR}/include)
 
-    # Handle cppcrc include directory
-    if(DEFINED cppcrc_SOURCE_DIR)
-        zephyr_include_directories(${cppcrc_SOURCE_DIR})
-    endif()
+  # Handle cppcrc include directory
+  if(DEFINED cppcrc_SOURCE_DIR)
+    zephyr_include_directories(${cppcrc_SOURCE_DIR})
+  endif()
 
-    if(DEFINED frozen_SOURCE_DIR)
-        zephyr_include_directories(${frozen_SOURCE_DIR}/include)
-    elseif(TARGET frozen::frozen)
-        get_target_property(frozen_includes frozen::frozen INTERFACE_INCLUDE_DIRECTORIES)
-        if(frozen_includes)
-            zephyr_include_directories(${frozen_includes})
-        endif()
+  if(DEFINED frozen_SOURCE_DIR)
+    zephyr_include_directories(${frozen_SOURCE_DIR}/include)
+  elseif(TARGET frozen::frozen)
+    get_target_property(frozen_includes frozen::frozen INTERFACE_INCLUDE_DIRECTORIES)
+    if(frozen_includes)
+      zephyr_include_directories(${frozen_includes})
     endif()
+  endif()
 
-    # Handle tl-expected include directory
-    if(DEFINED tl-expected_SOURCE_DIR)
-        zephyr_include_directories(${tl-expected_SOURCE_DIR}/include)
-    elseif(TARGET tl::expected)
-        get_target_property(expected_includes tl::expected INTERFACE_INCLUDE_DIRECTORIES)
-        if(expected_includes)
-            zephyr_include_directories(${expected_includes})
-        endif()
+  # Handle tl-expected include directory
+  if(DEFINED tl-expected_SOURCE_DIR)
+    zephyr_include_directories(${tl-expected_SOURCE_DIR}/include)
+  elseif(TARGET tl::expected)
+    get_target_property(expected_includes tl::expected INTERFACE_INCLUDE_DIRECTORIES)
+    if(expected_includes)
+      zephyr_include_directories(${expected_includes})
     endif()
+  endif()
 endif ()
 
 target_link_libraries(rpl INTERFACE
@@ -42,52 +42,54 @@ target_link_libraries(rpl INTERFACE
         frozen
 )
 
+target_compile_features(rpl INTERFACE cxx_std_20)
+
 target_compile_definitions(rpl INTERFACE
         FRAME_HEADER_TAG=${FRAME_HEADER_TAG}
 )
 
 if (NOT ZEPHYR_TOOLCHAIN_VARIANT)
-    # Install RPL library headers
-    install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/RPL
+  # Install RPL library headers
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/RPL
             DESTINATION include
             FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     )
 
-    # Install cppcrc header (it's a header-only library without install support)
-    install(FILES ${cppcrc_SOURCE_DIR}/cppcrc.h
+  # Install cppcrc header (it's a header-only library without install support)
+  install(FILES ${cppcrc_SOURCE_DIR}/cppcrc.h
             DESTINATION include
     )
 
-    # Install the rpl target
-    install(TARGETS rpl
+  # Install the rpl target
+  install(TARGETS rpl
             EXPORT rplTargets
             INCLUDES DESTINATION include
     )
 
-    # Create and install CMake package config files
-    include(CMakePackageConfigHelpers)
+  # Create and install CMake package config files
+  include(CMakePackageConfigHelpers)
 
-    # Configure the package config file from template
-    configure_package_config_file(
+  # Configure the package config file from template
+  configure_package_config_file(
             ${PROJECT_SOURCE_DIR}/cmake/rplConfig.cmake.in
             ${CMAKE_CURRENT_BINARY_DIR}/rplConfig.cmake
             INSTALL_DESTINATION lib/cmake/rpl
     )
 
-    write_basic_package_version_file(
+  write_basic_package_version_file(
             ${CMAKE_CURRENT_BINARY_DIR}/rplConfigVersion.cmake
             VERSION ${PROJECT_VERSION}
             COMPATIBILITY SameMajorVersion
     )
 
-    # Install the export set
-    install(EXPORT rplTargets
+  # Install the export set
+  install(EXPORT rplTargets
             FILE rplTargets.cmake
             NAMESPACE rpl::
             DESTINATION lib/cmake/rpl
     )
 
-    install(FILES
+  install(FILES
             ${CMAKE_CURRENT_BINARY_DIR}/rplConfig.cmake
             ${CMAKE_CURRENT_BINARY_DIR}/rplConfigVersion.cmake
             DESTINATION lib/cmake/rpl
