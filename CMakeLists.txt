@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
-project(rpl VERSION 0.3.0)
+project(rpl VERSION 0.3.1)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
-set(RPL_VERSION 0.3.0)
+set(RPL_VERSION 0.3.1)
 option(BUILD_RPL_BENCHMARK "Enable building RPL Benchmark" OFF)
 option(BUILD_RPL_TESTS "Enable building RPL Tests" OFF)
 option(BUILD_RPL_LIBRARY "Enable building RPL Library" ON)
