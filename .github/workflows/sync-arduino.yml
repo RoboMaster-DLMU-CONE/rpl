@@ -1,0 +1,49 @@
+name: Sync to Arduino Repo
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  sync-arduino:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Checkout Target
+        uses: actions/checkout@v4
+        with:
+          repository: RoboMaster-DLMU-CONE/rpl-arduino
+          path: rpl-arduino
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Run Sync Script
+        run: python3 scripts/sync_arduino.py
+
+      - name: Copy Metadata
+        run: |
+          cp scripts/library.json rpl-arduino/
+          cp scripts/library.properties rpl-arduino/
+          cp README.md rpl-arduino/
+          cp LICENSE rpl-arduino/
+
+      - name: Commit and Push
+        run: |
+          cd rpl-arduino
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Sync from rpl main repo: ${{ github.ref_name }}"
+            git tag ${{ github.ref_name }}
+            git push origin HEAD:main --tags
+          fi
