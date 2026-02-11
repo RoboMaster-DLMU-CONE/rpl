@@ -1,6 +1,6 @@
 {
   "name": "RPL",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "High-performance C++20 serialization/deserialization library for RoboMaster",
   "keywords": "robomaster, serialization, packet, protocol, c++20",
   "repository": {
@@ -14,17 +14,23 @@
       "url": "https://github.com/RoboMaster-DLMU-CONE"
     }
   ],
-  "license": "MIT",
-  "frameworks": ["arduino"],
-  "platforms": ["espressif32", "ststm32", "teensy", "raspberrypi"],
+  "license": "ISC",
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif32",
+    "ststm32",
+    "teensy",
+    "raspberrypi"
+  ],
   "export": {
     "include": "src"
   },
   "build": {
     "flags": [
-      "-std=c++20",
-      "-Wno-register",
-      "-Isrc/3rdparty"
+      "-std=gnu++20",
+      "-Wno-register"
     ],
     "unflags": [
       "-std=gnu++11",

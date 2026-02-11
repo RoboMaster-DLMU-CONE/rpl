@@ -43,8 +43,12 @@ jobs:
           git add .
           if git diff --staged --quiet; then
             echo "No changes to commit"
+            # Force update tag even if no changes
+            git tag -f ${{ github.ref_name }}
+            git push origin HEAD:main --tags -f
           else
             git commit -m "Sync from rpl main repo: ${{ github.ref_name }}"
-            git tag ${{ github.ref_name }}
-            git push origin HEAD:main --tags
+            # Force tag update
+            git tag -f ${{ github.ref_name }}
+            git push origin HEAD:main --tags -f
           fi

@@ -9,8 +9,10 @@ from pathlib import Path
 # Configuration
 SOURCE_DIR = Path("include/RPL")
 DEST_DIR = Path("rpl-arduino/src/RPL")
-DEPS_DIR = Path("rpl-arduino/src/3rdparty")
+# Use root src directory for dependencies to ensure they are in the include path
+DEPS_ROOT = Path("rpl-arduino/src")
 ROOT_SRC = Path("rpl-arduino/src")
+
 DEPS = {
     "frozen": {
         "url": "https://github.com/serge-sans-paille/frozen/archive/refs/tags/1.2.0.tar.gz",
@@ -65,14 +67,22 @@ def sync_rpl():
     shutil.copytree(SOURCE_DIR, DEST_DIR)
 
 def sync_deps():
-    clean_dir(DEPS_DIR)
+    # Dependencies are now installed directly into src/ so they are in the include path
+    # We do NOT clean DEPS_ROOT here as it contains RPL code
     
     for name, config in DEPS.items():
         print(f"Processing {name}...")
         extract_path = download_extract(config["url"], config["type"])
         
         src = Path(extract_path) / config["include_src"]
-        dest = DEPS_DIR / config["include_dest"]
+        dest = DEPS_ROOT / config["include_dest"]
+        
+        # Clean destination if it exists
+        if dest.exists():
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            else:
+                os.remove(dest)
         
         if config.get("is_file"):
             shutil.copy2(src, dest)
