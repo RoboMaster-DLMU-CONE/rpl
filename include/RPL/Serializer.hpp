@@ -15,7 +15,6 @@
 #include "Utils/Error.hpp"
 #include "Utils/Def.hpp"
 #include <tl/expected.hpp>
-#include <cppcrc.h>
 #include <cstring>
 #include <cstdint>
 #include <variant>
@@ -81,23 +80,24 @@ namespace RPL
                 uint8_t* current_buffer = buffer + offset;
                 current_buffer[0] = FRAME_START_BYTE;
 
-                // cmd
-                current_buffer[1] = static_cast<uint8_t>(cmd & 0xFF);
-                current_buffer[2] = static_cast<uint8_t>((cmd >> 8) & 0xFF);
-
-                // data size
+                // data_length (bytes 1-2)
                 const auto data_size_u16 = static_cast<uint16_t>(data_size);
-                current_buffer[3] = static_cast<uint8_t>(data_size_u16 & 0xFF);
-                current_buffer[4] = static_cast<uint8_t>((data_size_u16 >> 8) & 0xFF);
+                current_buffer[1] = static_cast<uint8_t>(data_size_u16 & 0xFF);
+                current_buffer[2] = static_cast<uint8_t>((data_size_u16 >> 8) & 0xFF);
 
-                // seq
-                current_buffer[5] = m_Sequence;
+                // seq (byte 3)
+                current_buffer[3] = m_Sequence;
 
-                const uint8_t header_crc8 = CRC8::CRC8::calc(current_buffer, 6);
-                current_buffer[6] = header_crc8;
+                // CRC8 covers SOF + data_length + seq (bytes 0-3), stored at byte 4
+                const uint8_t header_crc8 = ProtocolCRC8::calc(current_buffer, 4);
+                current_buffer[4] = header_crc8;
+
+                // cmd_id (bytes 5-6)
+                current_buffer[5] = static_cast<uint8_t>(cmd & 0xFF);
+                current_buffer[6] = static_cast<uint8_t>((cmd >> 8) & 0xFF);
                 std::memcpy(current_buffer + FRAME_HEADER_SIZE, &packet, data_size);
 
-                const uint16_t frame_crc16 = CRC16::CCITT_FALSE::calc(current_buffer, FRAME_HEADER_SIZE + data_size);
+                const uint16_t frame_crc16 = ProtocolCRC16::calc(current_buffer, FRAME_HEADER_SIZE + data_size);
                 current_buffer[FRAME_HEADER_SIZE + data_size] = static_cast<uint8_t>(frame_crc16 & 0xFF);
                 current_buffer[FRAME_HEADER_SIZE + data_size + 1] = static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
 

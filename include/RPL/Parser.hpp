@@ -14,9 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cppcrc.h>
 #include <optional>
-
 #include "Containers/RingBuffer.hpp"
 #include "Deserializer.hpp"
 #include "Meta/PacketTraits.hpp"
@@ -274,19 +272,20 @@ private:
     if (header_ptr[0] != FRAME_START_BYTE)
       return ParseResult::Failure;
 
-    const uint8_t received_crc8 = header_ptr[6];
-    if (CRC8::CRC8::calc(header_ptr, 6) != received_crc8)
+    // CRC8 覆盖 SOF + data_length + seq（字节 0-3），存放在字节 4
+    const uint8_t received_crc8 = header_ptr[4];
+    if (ProtocolCRC8::calc(header_ptr, 4) != received_crc8)
       return ParseResult::Failure;
 
-    // 提取元数据
+    // 提取元数据：data_length 在字节 1-2，cmd_id 在字节 5-6
     uint16_t cmd;
     uint16_t data_length;
 #if defined(__ARM_FEATURE_UNALIGNED) || defined(__i386__) || defined(__x86_64__)
-    cmd = *reinterpret_cast<const uint16_t *>(header_ptr + 1);
-    data_length = *reinterpret_cast<const uint16_t *>(header_ptr + 3);
+    data_length = *reinterpret_cast<const uint16_t *>(header_ptr + 1);
+    cmd = *reinterpret_cast<const uint16_t *>(header_ptr + 5);
 #else
-    std::memcpy(&cmd, header_ptr + 1, sizeof(uint16_t));
-    std::memcpy(&data_length, header_ptr + 3, sizeof(uint16_t));
+    std::memcpy(&data_length, header_ptr + 1, sizeof(uint16_t));
+    std::memcpy(&cmd, header_ptr + 5, sizeof(uint16_t));
 #endif
 
     // 检查长度
@@ -304,11 +303,11 @@ private:
 
     if (view.size() >= crc16_data_len) {
       // 快速路径：整个 CRC 计算区域都在连续内存中
-      calculated_crc16 = CRC16::CCITT_FALSE::calc(view.data(), crc16_data_len);
+      calculated_crc16 = ProtocolCRC16::calc(view.data(), crc16_data_len);
     } else {
       // 慢速路径：分段计算
       // 第一段
-      uint16_t crc_part1 = CRC16::CCITT_FALSE::calc(view.data(), view.size());
+      uint16_t crc_part1 = ProtocolCRC16::calc(view.data(), view.size());
 
       // 第二段：从 RingBuffer 读取跨界数据到 parse_buffer
       const size_t second_part_len = crc16_data_len - view.size();
@@ -316,8 +315,8 @@ private:
         return ParseResult::Incomplete;
       }
 
-      calculated_crc16 = CRC16::CCITT_FALSE::calc(parse_buffer.data(),
-                                                  second_part_len, crc_part1);
+      calculated_crc16 = ProtocolCRC16::calc(parse_buffer.data(),
+                                              second_part_len, crc_part1);
     }
 
     // 读取接收到的 CRC16
@@ -357,13 +356,14 @@ private:
       return std::nullopt;
     }
 
-    const uint16_t cmd = *reinterpret_cast<const uint16_t *>(header + 1);
+    // data_length 在字节 1-2，seq 在字节 3，CRC8 在字节 4，cmd_id 在字节 5-6
     const uint16_t data_length =
-        *reinterpret_cast<const uint16_t *>(header + 3);
-    const uint8_t sequence_number = header[5];
-    const uint8_t received_crc8 = header[6];
+        *reinterpret_cast<const uint16_t *>(header + 1);
+    const uint8_t sequence_number = header[3];
+    const uint8_t received_crc8 = header[4];
+    const uint16_t cmd = *reinterpret_cast<const uint16_t *>(header + 5);
 
-    const uint8_t calculated_crc8 = CRC8::CRC8::calc(header, 6);
+    const uint8_t calculated_crc8 = ProtocolCRC8::calc(header, 4);
     if (calculated_crc8 != received_crc8) {
       return std::nullopt;
     }

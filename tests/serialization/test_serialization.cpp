@@ -33,16 +33,16 @@ void test_single_packet_serialization() {
   // Check frame structure
   assert(buffer[0] == 0xA5); // Start byte
 
-  // Check command (little endian)
-  uint16_t cmd = *reinterpret_cast<const uint16_t *>(buffer.data() + 1);
+  // Check command (little endian) — cmd_id now at bytes 5-6
+  uint16_t cmd = *reinterpret_cast<const uint16_t *>(buffer.data() + 5);
   assert(cmd == RPL::Meta::PacketTraits<SampleA>::cmd);
 
-  // Check data length
-  uint16_t data_length = *reinterpret_cast<const uint16_t *>(buffer.data() + 3);
+  // Check data length — data_length now at bytes 1-2
+  uint16_t data_length = *reinterpret_cast<const uint16_t *>(buffer.data() + 1);
   assert(data_length == RPL::Meta::PacketTraits<SampleA>::size);
 
-  // Check sequence number
-  assert(buffer[5] == 0);
+  // Check sequence number — seq now at byte 3
+  assert(buffer[3] == 0);
 
   std::cout << "✓ Single packet serialization passed" << std::endl;
 }
@@ -68,14 +68,14 @@ void test_multi_packet_serialization() {
 
   // Check first frame (SampleA)
   assert(buffer[0] == 0xA5);
-  uint16_t cmd_a = *reinterpret_cast<const uint16_t *>(buffer.data() + 1);
+  uint16_t cmd_a = *reinterpret_cast<const uint16_t *>(buffer.data() + 5);
   assert(cmd_a == RPL::Meta::PacketTraits<SampleA>::cmd);
 
   // Check second frame (SampleB)
   size_t offset = RPL::Serializer<SampleA, SampleB>::frame_size<SampleA>();
   assert(buffer[offset] == 0xA5);
   uint16_t cmd_b =
-      *reinterpret_cast<const uint16_t *>(buffer.data() + offset + 1);
+      *reinterpret_cast<const uint16_t *>(buffer.data() + offset + 5);
   assert(cmd_b == RPL::Meta::PacketTraits<SampleB>::cmd);
 
   std::cout << "✓ Multi-packet serialization passed" << std::endl;
@@ -146,7 +146,7 @@ void test_sequence_number_handling() {
   for (uint8_t seq = 0; seq < 5; ++seq) {
     auto result = serializer.serialize(buffer.data(), buffer.size(), packet);
     assert(result.has_value());
-    assert(buffer[5] == seq); // Sequence number at position 5
+    assert(buffer[3] == seq); // Sequence number at byte 3
   }
 
   std::cout << "✓ Sequence number handling passed" << std::endl;
