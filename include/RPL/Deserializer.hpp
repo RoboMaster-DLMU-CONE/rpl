@@ -81,7 +81,10 @@ public:
    * @return 指向数据缓冲区的指针，如果命令码无效则返回nullptr
    */
   [[nodiscard]] constexpr uint8_t *getWritePtr(uint16_t cmd) noexcept {
-    return reinterpret_cast<uint8_t *>(&pool.buffer[Collector::cmd_index(cmd)]);
+    const auto index = Collector::cmd_index(cmd);
+    if (index == static_cast<size_t>(-1))
+      return nullptr;
+    return reinterpret_cast<uint8_t *>(&pool.buffer[index]);
   }
 };
 } // namespace RPL
