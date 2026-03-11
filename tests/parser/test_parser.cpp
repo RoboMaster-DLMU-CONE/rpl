@@ -168,8 +168,9 @@ void test_buffer_clearing_and_state_management()
     RPL::Deserializer<SampleA> deserializer;
     RPL::Parser<SampleA> parser{deserializer};
 
-    // Add some data to the buffer
-    std::vector<uint8_t> test_data = {0xA5, 0x02, 0x01, 0x0F, 0x00, 0x01, 0xC8};
+    // Add some data to the buffer (valid partial SampleA frame header:
+    // SOF=0xA5, data_length=15 LE, seq=0x00, CRC8=0x9C, cmd=0x0102 LE)
+    std::vector<uint8_t> test_data = {0xA5, 0x0F, 0x00, 0x00, 0x9C, 0x02, 0x01};
     auto result1 = parser.push_data(test_data.data(), test_data.size());
     assert(result1.has_value());
 
