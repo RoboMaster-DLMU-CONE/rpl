@@ -380,16 +380,13 @@ private:
 
       // 9. 反序列化
       buffer.discard(P::header_size);
-      
-      // discard does not invalidate the view pointer if no wrap occurs, 
+
+      // discard does not invalidate the view pointer if no wrap occurs,
       // but internal buffer state changes.
       // frame_start points to header start.
       // data start = frame_start + P::header_size
-      
-      uint8_t *write_ptr = deserializer.getWritePtr(cmd_id);
-      if (write_ptr) {
-        std::memcpy(write_ptr, frame_start + P::header_size, data_len);
-      }
+
+      deserializer.write(cmd_id, frame_start + P::header_size, data_len);
 
       // discard data and tail
       buffer.discard(data_len + P::tail_size);
@@ -416,15 +413,8 @@ private:
     // 9. 反序列化
     buffer.discard(P::header_size);
 
-    uint8_t *write_ptr = deserializer.getWritePtr(cmd_id);
-    if (write_ptr) {
-      // read from buffer (which now starts at data)
-      // or copy from parse_buffer (offset by header_size)
-      std::memcpy(write_ptr, parse_buffer.data() + P::header_size, data_len);
-      buffer.discard(data_len);
-    } else {
-      buffer.discard(data_len);
-    }
+    deserializer.write(cmd_id, parse_buffer.data() + P::header_size, data_len);
+    buffer.discard(data_len);
 
     buffer.discard(P::tail_size);
     return ParseResult::Success;

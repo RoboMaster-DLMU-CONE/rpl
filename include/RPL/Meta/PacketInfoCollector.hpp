@@ -110,6 +110,26 @@ template <typename... Ts> struct PacketInfoCollector {
     auto it = cmdToIndex.find(cmd);
     return it != cmdToIndex.end() ? it->second : static_cast<size_t>(-1);
   }
+
+  /**
+   * @brief 命令码到序列索引的映射（0-based 类型序号，用于 SeqLock version 数组）
+   */
+  static constexpr auto cmdToSeqIndex = []() {
+    std::array<std::pair<uint16_t, size_t>, sizeof...(Ts)> pairs{};
+    size_t index = 0;
+    ((pairs[index] = std::make_pair(PacketTraits<Ts>::cmd, index), ++index),
+     ...);
+    return frozen::make_unordered_map(pairs);
+  }();
+
+  static constexpr size_t cmd_seq_index(uint16_t cmd) noexcept {
+    auto it = cmdToSeqIndex.find(cmd);
+    return it != cmdToSeqIndex.end() ? it->second : static_cast<size_t>(-1);
+  }
+
+  template <typename T> static constexpr size_t type_seq_index() noexcept {
+    return cmd_seq_index(PacketTraits<T>::cmd);
+  }
 };
 } // namespace RPL::Meta
 

@@ -13,6 +13,8 @@
 
 #include "Containers/MemoryPool.hpp"
 #include "Meta/PacketInfoCollector.hpp"
+#include "Utils/CompilerBarrier.hpp"
+#include <cstring>
 
 namespace RPL {
 /**
@@ -36,12 +38,37 @@ concept Deserializable = (std::is_same_v<T, Ts> || ...);
 template <typename... Ts> class Deserializer {
   using Collector = Meta::PacketInfoCollector<Ts...>; ///< 用于收集包信息的类型
   Containers::MemoryPool<Collector> pool{}; ///< 存储反序列化数据的内存池
+  volatile uint32_t versions_[sizeof...(Ts)]{}; ///< SeqLock version counters
 
 public:
   /**
-   * @brief 获取指定类型的数据包
+   * @brief SeqLock 写入方法
    *
-   * 从内存池中获取指定类型的反序列化数据包
+   * 供 Parser 调用，写入前后递增 version（odd=writing, even=done）
+   *
+   * @param cmd 命令码
+   * @param src 数据源指针
+   * @param len 数据长度
+   */
+  void write(uint16_t cmd, const uint8_t *src, size_t len) noexcept {
+    const auto byte_offset = Collector::cmd_index(cmd);
+    if (byte_offset == static_cast<size_t>(-1))
+      return;
+    const auto seq_idx = Collector::cmd_seq_index(cmd);
+
+    versions_[seq_idx] = versions_[seq_idx] + 1;
+    compiler_barrier();
+    std::memcpy(reinterpret_cast<uint8_t *>(&pool.buffer[byte_offset]), src,
+                len);
+    compiler_barrier();
+    versions_[seq_idx] = versions_[seq_idx] + 1;
+  }
+
+  /**
+   * @brief 获取指定类型的数据包（SeqLock 读循环）
+   *
+   * 从内存池中获取指定类型的反序列化数据包，
+   * 通过 SeqLock 保证读取一致性
    *
    * @tparam T 要获取的数据包类型
    * @return 指定类型的反序列化数据包
@@ -49,10 +76,20 @@ public:
   template <typename T>
     requires Deserializable<T, Ts...>
   T get() noexcept {
-    auto ptr = reinterpret_cast<uint8_t *>(
-        &pool.buffer[Collector::template type_index<T>()]);
-    Meta::PacketTraits<T>::before_get(ptr);
-    return *reinterpret_cast<T *>(ptr);
+    constexpr auto seq_idx = Collector::template type_seq_index<T>();
+    T result;
+    uint32_t v1, v2;
+    do {
+      v1 = versions_[seq_idx];
+      compiler_barrier();
+      auto ptr = reinterpret_cast<uint8_t *>(
+          &pool.buffer[Collector::template type_index<T>()]);
+      Meta::PacketTraits<T>::before_get(ptr);
+      result = *reinterpret_cast<const T *>(ptr);
+      compiler_barrier();
+      v2 = versions_[seq_idx];
+    } while (v1 != v2 || (v1 & 1));
+    return result;
   };
 
   /**
@@ -74,12 +111,11 @@ public:
   /**
    * @brief 获取指定命令码的写入指针
    *
-   * 获取内存池中指定命令码对应数据的写入指针，用于Parser写入数据
-   *
-   * @warning 存在竞态访问可能
+   * @deprecated 请改用 write() 方法以获得 SeqLock 线程安全保护
    * @param cmd 命令码
    * @return 指向数据缓冲区的指针，如果命令码无效则返回nullptr
    */
+  [[deprecated("Use write() for SeqLock-protected writes")]]
   [[nodiscard]] constexpr uint8_t *getWritePtr(uint16_t cmd) noexcept {
     const auto index = Collector::cmd_index(cmd);
     if (index == static_cast<size_t>(-1))
