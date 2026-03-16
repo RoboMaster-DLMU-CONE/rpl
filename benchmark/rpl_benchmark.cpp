@@ -108,12 +108,13 @@ public:
 
 BENCHMARK_F(ParserFixture, BM_Parser_PushAndParse_SinglePacket)(benchmark::State& state)
 {
+    // BipBuffer logic automatically resets when empty.
+    // If push_data succeeds, buffer is empty -> reset.
+    // So this loop tests the "Empty -> Write -> Read -> Reset" cycle.
+    // This includes overhead of buffer management.
+    
     for (auto _ : state)
     {
-        state.PauseTiming();
-        parser.clear_buffer();
-        state.ResumeTiming();
-
         auto result = parser.push_data(single_packet_buffer.data(), single_packet_buffer.size());
         benchmark::DoNotOptimize(result);
     }
@@ -123,10 +124,6 @@ BENCHMARK_F(ParserFixture, BM_Parser_PushAndParse_MultiPacket)(benchmark::State&
 {
     for (auto _ : state)
     {
-        state.PauseTiming();
-        parser.clear_buffer();
-        state.ResumeTiming();
-
         auto result = parser.push_data(multi_packet_buffer.data(), multi_packet_buffer.size());
         benchmark::DoNotOptimize(result);
     }
@@ -134,12 +131,11 @@ BENCHMARK_F(ParserFixture, BM_Parser_PushAndParse_MultiPacket)(benchmark::State&
 
 BENCHMARK_F(ParserFixture, BM_Parser_PushAndParse_WithNoise)(benchmark::State& state)
 {
+    // Noise buffer contains garbage then valid packet.
+    // Parser will discard garbage, find packet, discard packet.
+    // Buffer becomes empty -> Reset.
     for (auto _ : state)
     {
-        state.PauseTiming();
-        parser.clear_buffer();
-        state.ResumeTiming();
-
         auto result = parser.push_data(noisy_buffer.data(), noisy_buffer.size());
         benchmark::DoNotOptimize(result);
     }
