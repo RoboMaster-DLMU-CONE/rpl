@@ -73,33 +73,67 @@ namespace RPL
             auto serialize_one = [&]<typename T>(const T& packet)
             {
                 using DecayedT = std::decay_t<T>;
+                using Protocol = typename Meta::PacketTraits<DecayedT>::Protocol;
                 constexpr uint16_t cmd = Meta::PacketTraits<DecayedT>::cmd;
                 constexpr size_t data_size = Meta::PacketTraits<DecayedT>::size;
                 constexpr size_t current_frame_size = frame_size<DecayedT>();
 
                 uint8_t* current_buffer = buffer + offset;
-                current_buffer[0] = FRAME_START_BYTE;
+                
+                // 1. Frame Header (Start Byte(s))
+                current_buffer[0] = Protocol::start_byte;
+                if constexpr (Protocol::has_second_byte) {
+                    current_buffer[1] = Protocol::second_byte;
+                }
 
-                // data_length (bytes 1-2)
-                const auto data_size_u16 = static_cast<uint16_t>(data_size);
-                current_buffer[1] = static_cast<uint8_t>(data_size_u16 & 0xFF);
-                current_buffer[2] = static_cast<uint8_t>((data_size_u16 >> 8) & 0xFF);
+                // 2. Length Field
+                if constexpr (Protocol::has_length_field) {
+                    const auto data_size_u16 = static_cast<uint16_t>(data_size);
+                    // Assuming little-endian for length field
+                    if constexpr (Protocol::length_field_bytes == 1) {
+                        current_buffer[Protocol::length_offset] = static_cast<uint8_t>(data_size_u16 & 0xFF);
+                    } else {
+                        current_buffer[Protocol::length_offset] = static_cast<uint8_t>(data_size_u16 & 0xFF);
+                        current_buffer[Protocol::length_offset + 1] = static_cast<uint8_t>((data_size_u16 >> 8) & 0xFF);
+                    }
+                }
 
-                // seq (byte 3)
-                current_buffer[3] = m_Sequence;
+                // 3. Sequence Field
+                if constexpr (requires { Protocol::has_seq_field; }) {
+                    if constexpr (Protocol::has_seq_field) {
+                        current_buffer[Protocol::seq_offset] = m_Sequence;
+                    }
+                }
 
-                // CRC8 covers SOF + data_length + seq (bytes 0-3), stored at byte 4
-                const uint8_t header_crc8 = ProtocolCRC8::calc(current_buffer, 4);
-                current_buffer[4] = header_crc8;
+                // 4. Header CRC
+                if constexpr (Protocol::has_header_crc) {
+                    // CRC8 covers bytes from 0 to header_crc_offset
+                    const uint8_t header_crc8 = ProtocolCRC8::calc(current_buffer, Protocol::header_crc_offset);
+                    current_buffer[Protocol::header_crc_offset] = header_crc8;
+                }
 
-                // cmd_id (bytes 5-6)
-                current_buffer[5] = static_cast<uint8_t>(cmd & 0xFF);
-                current_buffer[6] = static_cast<uint8_t>((cmd >> 8) & 0xFF);
-                std::memcpy(current_buffer + FRAME_HEADER_SIZE, &packet, data_size);
+                // 5. Command ID Field
+                if constexpr (Protocol::has_cmd_field) {
+                    // Assuming little-endian for cmd field
+                    if constexpr (Protocol::cmd_field_bytes == 1) {
+                        current_buffer[Protocol::cmd_offset] = static_cast<uint8_t>(cmd & 0xFF);
+                    } else {
+                        current_buffer[Protocol::cmd_offset] = static_cast<uint8_t>(cmd & 0xFF);
+                        current_buffer[Protocol::cmd_offset + 1] = static_cast<uint8_t>((cmd >> 8) & 0xFF);
+                    }
+                }
 
-                const uint16_t frame_crc16 = ProtocolCRC16::calc(current_buffer, FRAME_HEADER_SIZE + data_size);
-                current_buffer[FRAME_HEADER_SIZE + data_size] = static_cast<uint8_t>(frame_crc16 & 0xFF);
-                current_buffer[FRAME_HEADER_SIZE + data_size + 1] = static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
+                // 6. Data Payload
+                std::memcpy(current_buffer + Protocol::header_size, &packet, data_size);
+
+                // 7. Frame Tail (CRC)
+                // Use Protocol-specific CRC algorithm
+                using FrameCRC = typename Protocol::CRC;
+                const uint16_t frame_crc16 = FrameCRC::calc(current_buffer, Protocol::header_size + data_size);
+                
+                // Assuming little-endian for CRC16
+                current_buffer[Protocol::header_size + data_size] = static_cast<uint8_t>(frame_crc16 & 0xFF);
+                current_buffer[Protocol::header_size + data_size + 1] = static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
 
                 offset += current_frame_size;
             };
@@ -122,7 +156,8 @@ namespace RPL
         static constexpr size_t frame_size() noexcept
         {
             using DecayedT = std::decay_t<T>;
-            return FRAME_HEADER_SIZE + Meta::PacketTraits<DecayedT>::size + FRAME_TAIL_SIZE;
+            using Protocol = typename Meta::PacketTraits<DecayedT>::Protocol;
+            return Protocol::header_size + Meta::PacketTraits<DecayedT>::size + Protocol::tail_size;
         }
 
         /**
@@ -137,7 +172,7 @@ namespace RPL
         {
             size_t result = 0;
             ((Meta::PacketTraits<Ts>::cmd == cmd
-                  ? (result = FRAME_HEADER_SIZE + Meta::PacketTraits<Ts>::size + FRAME_TAIL_SIZE)
+                  ? (result = frame_size<Ts>())
                   : 0), ...);
             return result;
         }

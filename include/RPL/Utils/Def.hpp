@@ -22,6 +22,9 @@ namespace RPL
     using ProtocolCRC8  = crc_utils::crc<uint8_t,  0x31,   0xFF,   true,  true,  0x00>;
     /// CRC16: CRC-16/MCRF4XX, poly=0x1021, init=0xFFFF, reflected input/output — 与裁判系统协议一致
     using ProtocolCRC16 = CRC16::MCRF4XX;
+
+    /// CRC16-CCITT/FALSE: poly=0x1021, init=0xFFFF, no reflection — 用于VT03/VT13图传模块
+    using ProtocolCRC16_VT = crc_utils::crc<uint16_t, 0x1021, 0xFFFF, false, false, 0x0000>;
 }
 
 #endif //RPL_DEF_HPP
