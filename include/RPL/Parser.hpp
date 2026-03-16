@@ -11,7 +11,7 @@
 #ifndef RPL_PARSER_HPP
 #define RPL_PARSER_HPP
 
-#include "Containers/RingBuffer.hpp"
+#include "Containers/BipBuffer.hpp"
 #include "Deserializer.hpp"
 #include "Meta/PacketTraits.hpp"
 #include "Utils/Def.hpp"
@@ -149,7 +149,7 @@ template <typename... Ts> class Parser {
   static constexpr size_t buffer_size = calculate_buffer_size();
 
   // --- 成员变量 ---
-  Containers::RingBuffer<buffer_size> ringbuffer;
+  Containers::BipBuffer<buffer_size> buffer;
   std::array<uint8_t, max_frame_size> parse_buffer{};
   Deserializer<Ts...> &deserializer;
 
@@ -162,7 +162,11 @@ template <typename... Ts> class Parser {
       uint8_t sb = W::Protocol::start_byte;
       // 检查冲突：如果该字节已被占用，且不是同一个 Worker (理论上去重后 index
       // 唯一) 这里主要防备不同 Worker 使用相同 StartByte
-      assert(table[sb] != 0xFF && table[sb] != index);
+      if (table[sb] != 0xFF && table[sb] != index) {
+        // Compile-time error force
+        throw "Header collision detected";
+      }
+      // assert(table[sb] != 0xFF && table[sb] != index);
       // TODO: Better comptime exception throwing
       table[sb] = static_cast<uint8_t>(index);
     };
@@ -183,21 +187,21 @@ template <typename... Ts> class Parser {
 public:
   explicit Parser(Deserializer<Ts...> &des) : deserializer(des) {}
 
-  tl::expected<void, Error> push_data(const uint8_t *buffer,
+  tl::expected<void, Error> push_data(const uint8_t *data,
                                       const size_t length) {
-    if (!ringbuffer.write(buffer, length)) {
+    if (!buffer.write(data, length)) {
       return tl::unexpected(
-          Error{ErrorCode::BufferOverflow, "Ringbuffer overflow"});
+          Error{ErrorCode::BufferOverflow, "Buffer overflow"});
     }
     return try_parse_packets();
   }
 
   std::span<uint8_t> get_write_buffer() noexcept {
-    return ringbuffer.get_write_buffer();
+    return buffer.get_write_buffer();
   }
 
   tl::expected<void, Error> advance_write_index(size_t length) {
-    if (!ringbuffer.advance_write_index(length)) {
+    if (!buffer.advance_write_index(length)) {
       return tl::unexpected(
           Error{ErrorCode::BufferOverflow, "Invalid advance length"});
     }
@@ -205,18 +209,18 @@ public:
   }
 
   Deserializer<Ts...> &get_deserializer() noexcept { return deserializer; }
-  size_t available_data() const noexcept { return ringbuffer.available(); }
-  size_t available_space() const noexcept { return ringbuffer.space(); }
-  bool is_buffer_full() const noexcept { return ringbuffer.full(); }
-  void clear_buffer() noexcept { ringbuffer.clear(); }
+  size_t available_data() const noexcept { return buffer.available(); }
+  size_t available_space() const noexcept { return buffer.space(); }
+  bool is_buffer_full() const noexcept { return buffer.full(); }
+  void clear_buffer() noexcept { buffer.clear(); }
 
   tl::expected<void, Error> try_parse_packets() {
-    size_t available_bytes = ringbuffer.available();
+    size_t available_bytes = buffer.available();
 
     // 最小帧头长度，为了安全起见取最小的一个，或者简单的 1 (只要有 start byte
     // 就能查表) 实际解析中会检查具体 Protocol 的 header_size
     while (available_bytes > 0) {
-      const auto buffer_view = ringbuffer.get_contiguous_read_buffer();
+      const auto buffer_view = buffer.get_contiguous_read_buffer();
       const uint8_t *data_ptr = buffer_view.data();
       const size_t view_size = buffer_view.size();
 
@@ -236,28 +240,31 @@ public:
         // 找到潜在帧头，尝试调用对应的 Worker
         // 需要先丢弃这一段之前的垃圾数据
         if (scan_offset > 0) {
-          ringbuffer.discard(scan_offset);
+          buffer.discard(scan_offset);
           available_bytes -= scan_offset;
           // 更新视图（虽然 loop 会 break 但为了逻辑清晰）
         }
 
         ParseResult result = ParseResult::Incomplete;
 
+        // Pass the remaining view to parse_frame_impl for optimization
+        auto current_view = buffer_view.subspan(scan_offset);
+
         // 使用 tuple_switch 动态分发到编译期生成的 Worker
-        Details::runtime_get(worker_idx, WorkerTuple{},
-                             [&](auto worker_instance) {
-                               using WorkerType = decltype(worker_instance);
-                               result = this->parse_frame_impl<WorkerType>();
-                             });
+        Details::runtime_get(
+            worker_idx, WorkerTuple{}, [&](auto worker_instance) {
+              using WorkerType = decltype(worker_instance);
+              result = this->parse_frame_impl<WorkerType>(current_view);
+            });
 
         if (result == ParseResult::Success) {
           // 成功，继续下一次大循环（重新获取 view）
-          available_bytes = ringbuffer.available();
+          available_bytes = buffer.available();
           frame_handled = true;
           break;
         } else if (result == ParseResult::Failure) {
           // 失败，丢弃 1 字节（Start Byte），继续扫描
-          ringbuffer.discard(1);
+          buffer.discard(1);
           available_bytes--;
           // 重新获取 view 指针位置
           // 简单起见，break 出去重新 get buffer view
@@ -274,7 +281,7 @@ public:
         // 当前 view 扫描完了都没找到，或者最后剩下的一点不够
         // 如果 scan_offset == view_size，说明全是垃圾，已全部丢弃
         if (scan_offset == view_size) {
-          ringbuffer.discard(view_size);
+          buffer.discard(view_size);
           available_bytes -= view_size;
         }
         // 如果 available 还有数据 (Wrap around 的情况)，继续大循环
@@ -287,34 +294,39 @@ public:
 
 private:
   // --- 通用帧解析实现 ---
-  template <typename Worker> ParseResult parse_frame_impl() {
+  template <typename Worker>
+  ParseResult parse_frame_impl(std::span<const uint8_t> view) {
     using P = typename Worker::Protocol;
 
     // 1. 检查数据量是否足够读取帧头
-    if (ringbuffer.available() < P::header_size)
+    if (buffer.available() < P::header_size)
       return ParseResult::Incomplete;
 
     // 2. 读取帧头
-    std::array<uint8_t, P::header_size> header_buf;
-    if (!ringbuffer.peek(header_buf.data(), 0, P::header_size))
-      return ParseResult::Incomplete;
+    const uint8_t *header_ptr = nullptr;
+    std::array<uint8_t, P::header_size> header_copy;
+
+    if (view.size() >= P::header_size) {
+      header_ptr = view.data();
+    } else {
+      if (!buffer.peek(header_copy.data(), 0, P::header_size))
+        return ParseResult::Incomplete;
+      header_ptr = header_copy.data();
+    }
 
     // 3. 验证 Start Byte (双重检查，虽然 LUT 已经过了)
-    if (header_buf[0] != P::start_byte)
+    if (header_ptr[0] != P::start_byte)
       return ParseResult::Failure;
 
     // 4. 验证 Second Byte (如果有)
     if constexpr (P::has_second_byte) {
-      // 假设 second byte 紧跟 start byte，即 index 1
-      if (header_buf[1] != P::second_byte)
+      if (header_ptr[1] != P::second_byte)
         return ParseResult::Failure;
     }
 
     // 5. 验证 Header CRC (如果有)
     if constexpr (P::has_header_crc) {
-      // 兼容旧逻辑：RoboMaster CRC8 check
-      // CRC8 at index 4, len 4 (0..3)
-      if (RPL::ProtocolCRC8::calc(header_buf.data(), 4) != header_buf[4])
+      if (RPL::ProtocolCRC8::calc(header_ptr, 4) != header_ptr[4])
         return ParseResult::Failure;
     }
 
@@ -326,15 +338,12 @@ private:
     if constexpr (Worker::is_fixed) {
       data_len = Worker::fixed_size;
     } else {
-      // 动态长度，从 Header 读取
-      // 假设 length 字段是 uint16_t
       if constexpr (P::length_field_bytes == 2) {
-        std::memcpy(&data_len, header_buf.data() + P::length_offset, 2);
+        std::memcpy(&data_len, header_ptr + P::length_offset, 2);
       } else {
-        data_len = header_buf[P::length_offset];
+        data_len = header_ptr[P::length_offset];
       }
 
-      // 校验动态长度是否超限
       if (data_len > max_frame_size - P::header_size - P::tail_size)
         return ParseResult::Failure;
     }
@@ -343,65 +352,81 @@ private:
     if constexpr (Worker::is_fixed) {
       cmd_id = Worker::fixed_cmd;
     } else {
-      // 动态 CMD
       if constexpr (P::cmd_field_bytes == 2) {
-        std::memcpy(&cmd_id, header_buf.data() + P::cmd_offset, 2);
+        std::memcpy(&cmd_id, header_ptr + P::cmd_offset, 2);
       } else {
-        // handle other sizes if needed
+        // handle other sizes
       }
     }
 
     // 7. 检查总长度是否足够
     size_t total_len = P::header_size + data_len + P::tail_size;
-    if (ringbuffer.available() < total_len)
+    if (buffer.available() < total_len)
       return ParseResult::Incomplete;
 
-    // 8. 验证整包 CRC (Tail)
-    // 计算区域：Header + Data
-    // 校验值位置：最后 tail_size 字节
-    // 假设是 CRC16
+    // --- Fast Path: 全都在 view 中 (Zero Copy) ---
+    if (view.size() >= total_len) {
+      const uint8_t *frame_start = view.data();
 
-    // 读取用于计算 CRC 的数据 (Header + Data)
-    // 注意：分段处理
-    size_t calc_len = total_len - P::tail_size;
+      // 8. 验证整包 CRC
+      size_t calc_len = total_len - P::tail_size;
+      uint16_t calc_crc = P::CRC::calc(frame_start, calc_len);
 
-    // 优化：如果数据连续
-    uint16_t calc_crc = 0;
-    auto view = ringbuffer.get_contiguous_read_buffer();
+      uint16_t recv_crc = 0;
+      std::memcpy(&recv_crc, frame_start + calc_len, 2);
 
-    if (view.size() >= calc_len) {
-      calc_crc = P::CRC::calc(view.data(), calc_len);
-    } else {
-      // 分段
-      uint16_t crc1 = P::CRC::calc(view.data(), view.size());
-      // 读取剩余部分
-      size_t remain = calc_len - view.size();
-      // 这里需要 peek 跨界数据，复用 parse_buffer
-      if (!ringbuffer.peek(parse_buffer.data(), view.size(), remain))
-        return ParseResult::Incomplete;
-      calc_crc = P::CRC::calc(parse_buffer.data(), remain, crc1);
+      if (calc_crc != recv_crc)
+        return ParseResult::Failure;
+
+      // 9. 反序列化
+      buffer.discard(P::header_size);
+      
+      // discard does not invalidate the view pointer if no wrap occurs, 
+      // but internal buffer state changes.
+      // frame_start points to header start.
+      // data start = frame_start + P::header_size
+      
+      uint8_t *write_ptr = deserializer.getWritePtr(cmd_id);
+      if (write_ptr) {
+        std::memcpy(write_ptr, frame_start + P::header_size, data_len);
+      }
+
+      // discard data and tail
+      buffer.discard(data_len + P::tail_size);
+      return ParseResult::Success;
     }
 
-    // 读取尾部 CRC
-    uint16_t recv_crc = 0;
-    if (!ringbuffer.peek(reinterpret_cast<uint8_t *>(&recv_crc), calc_len, 2))
+    // --- Slow Path: 跨越边界 (Split Packet) ---
+    // 必须拷贝到连续内存进行 CRC 和 解析
+    // 复用 parse_buffer
+
+    if (!buffer.peek(parse_buffer.data(), 0, total_len))
       return ParseResult::Incomplete;
+
+    // 8. 验证整包 CRC
+    size_t calc_len = total_len - P::tail_size;
+    uint16_t calc_crc = P::CRC::calc(parse_buffer.data(), calc_len);
+
+    uint16_t recv_crc = 0;
+    std::memcpy(&recv_crc, parse_buffer.data() + calc_len, 2);
 
     if (calc_crc != recv_crc)
       return ParseResult::Failure;
 
     // 9. 反序列化
-    ringbuffer.discard(P::header_size);
+    buffer.discard(P::header_size);
 
     uint8_t *write_ptr = deserializer.getWritePtr(cmd_id);
     if (write_ptr) {
-      ringbuffer.read(write_ptr, data_len);
+      // read from buffer (which now starts at data)
+      // or copy from parse_buffer (offset by header_size)
+      std::memcpy(write_ptr, parse_buffer.data() + P::header_size, data_len);
+      buffer.discard(data_len);
     } else {
-      ringbuffer.discard(data_len);
+      buffer.discard(data_len);
     }
 
-    ringbuffer.discard(P::tail_size);
-
+    buffer.discard(P::tail_size);
     return ParseResult::Success;
   }
 };

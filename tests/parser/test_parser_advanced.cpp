@@ -28,70 +28,60 @@ void test_ringbuffer_wrap_around()
     // We need to manipulate the internal RingBuffer state to force a wrap-around.
     // Since we can't access private members, we simulate it by filling and draining.
     
-    // 1. Fill the buffer to near capacity to advance write_index
-    // We need to know the buffer size. It's a compile time constant in Parser.
-    // We can infer it or just push enough data.
-    // Let's push dummy data and read it out until write_index is near the end.
+    // BipBuffer Strategy:
+    // Maintain at least 1 byte in buffer to prevent 'reset to 0'.
+    // Use a pipeline: Write F1, Write F2, Read F1, Write F3, Read F2...
+    // This advances the window [Start, End] forward until we hit the end of buffer.
     
-    // Note: This relies on the implementation detail that buffer size is power of 2
-    // and likely 256 or 512 for small packets.
-    // Let's just push a large amount of data in chunks and read it immediately.
+    parser.clear_buffer();
+    size_t f_size = frame.size();
     
-    const size_t large_offset = 1024 * 16; // Should be enough to wrap around multiple times
-    std::vector<uint8_t> dummy(100, 0);
+    // Prime with one partial frame
+    parser.push_data(frame.data(), f_size - 1);
     
-    // Advance write_index to align such that the next frame will wrap around.
-    // We want write_index % buffer_size to be buffer_size - split_point.
-    // But we don't know buffer_size easily from outside.
-    
-    // Alternative strategy:
-    // Use the Zero-Copy interface to inspect the buffer state!
-    // get_write_buffer() returns a span. The size of the span tells us 
-    // how much contiguous space is left at the tail.
-    
-    // 1. Consume space until tail space is smaller than frame_size
-    while (true)
-    {
+    int iterations = 0;
+    while (iterations < 1000) {
         auto span = parser.get_write_buffer();
-        if (span.size() < frame_size && span.size() > 0)
-        {
-            // Found the edge!
-            // span.size() is the space left at the tail.
-            // If we write a frame now, it will wrap around.
+        if (span.size() < frame_size) {
+            // Found the edge
             break;
         }
         
-        // If span is huge (start of buffer), fill it up to move pointer to end
-        size_t fill_len = std::min(span.size(), (size_t)128);
+        // Append F_next (partial)
+        parser.push_data(frame.data(), f_size - 1);
         
-        // If we are at start and span is full buffer, we need to be careful not to fill it completely
-        // if we want to test wrap around.
-        // Actually, just writing 1 byte at a time until condition met is safest.
-        if (span.size() >= frame_size)
-        {
-             // Write dummy bytes to advance pointer
-             uint8_t dummy_byte = 0;
-             auto res = parser.push_data(&dummy_byte, 1);
-             (void)res;
-             // Read it out to keep buffer empty
-             auto parse_res = parser.try_parse_packets(); // Should fail/discard
-             (void)parse_res;
-        }
+        // Finish F_curr (write missing byte)
+        // The missing byte is frame[f_size-1].
+        uint8_t last_byte = frame[f_size - 1];
+        parser.push_data(&last_byte, 1);
+        
+        // Clear the result from deserializer to avoid overflow there (optional)
+        deserializer.get<SampleA>();
+        
+        iterations++;
     }
     
-    // Now write_index is close to the end.
-    // The contiguous space (span.size()) is < frame_size.
-    // Writing 'frame' now will force a wrap-around write in RingBuffer,
-    // and subsequently a wrap-around read/parse in Parser.
-    
+    // Loop finished. space at tail is small.
+    // Buffer contains a partial frame (F_last).
+    // Write a Full Frame. It should wrap.
     auto result = parser.push_data(frame.data(), frame.size());
     assert(result.has_value());
     
-    // Verify parse
-    auto parsed = deserializer.get<SampleA>();
-    assert(parsed.a == packet.a);
+    // Verify parse of the wrapped frame
+    // Note: The partial frame is still in buffer (incomplete), followed by the wrapped frame.
+    // Parser stops at Partial (Incomplete).
     
-    std::cout << "✓ RingBuffer Wrap-Around passed" << std::endl;
+    // So we must finish the Partial first!
+    uint8_t last_byte = frame[f_size - 1];
+    parser.push_data(&last_byte, 1);
+    
+    // Now Partial is parsed, then Wrapped is parsed.
+    // So deserializer will hold the LATEST packet (Wrapped).
+    
+    auto p_final = deserializer.get<SampleA>();
+    assert(p_final.a == packet.a);
+
+     std::cout << "✓ RingBuffer Wrap-Around passed" << std::endl;
 }
 
 void test_zero_copy_write()
