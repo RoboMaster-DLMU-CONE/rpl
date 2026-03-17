@@ -21,7 +21,7 @@ namespace RPL::Packets {
 
         // --- 校验 ---
         static constexpr bool has_header_crc = false;
-        using CRC = RPL::ProtocolCRC16_VT; // CCITT-FALSE
+        using CRC = RPL::ProtocolCRC16; // MCRF4XX
 
         // --- 策略 ---
         static constexpr bool has_length_field = false; // 固定长度

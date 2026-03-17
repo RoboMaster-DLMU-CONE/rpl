@@ -5,6 +5,7 @@ add_executable(rpl_sample_real_comm
 )
 
 target_link_libraries(rpl_sample_real_comm PUBLIC
-        HySerial::HySerial
+        HySerial
         rpl::rpl
+        uring
 )
