@@ -164,7 +164,11 @@ template <typename... Ts> class Parser {
       // 唯一) 这里主要防备不同 Worker 使用相同 StartByte
       if (table[sb] != 0xFF && table[sb] != index) {
         // Compile-time error force
+#ifndef EXCEPTION_DUMP
         throw "Header collision detected";
+#else
+        assert(false);
+#endif
       }
       // assert(table[sb] != 0xFF && table[sb] != index);
       // TODO: Better comptime exception throwing
@@ -370,7 +374,7 @@ private:
 
       // 8. 验证整包 CRC
       size_t calc_len = total_len - P::tail_size;
-      uint16_t calc_crc = P::CRC::calc(frame_start, calc_len);
+      uint16_t calc_crc = P::RPL_CRC::calc(frame_start, calc_len);
 
       uint16_t recv_crc = 0;
       std::memcpy(&recv_crc, frame_start + calc_len, 2);
@@ -402,7 +406,7 @@ private:
 
     // 8. 验证整包 CRC
     size_t calc_len = total_len - P::tail_size;
-    uint16_t calc_crc = P::CRC::calc(parse_buffer.data(), calc_len);
+    uint16_t calc_crc = P::RPL_CRC::calc(parse_buffer.data(), calc_len);
 
     uint16_t recv_crc = 0;
     std::memcpy(&recv_crc, parse_buffer.data() + calc_len, 2);

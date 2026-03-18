@@ -11,9 +11,9 @@
 #ifndef RPL_INFO_HPP
 #define RPL_INFO_HPP
 
+#include "RPL/Utils/Def.hpp"
 #include <cstddef>
 #include <cstdint>
-#include "RPL/Utils/Def.hpp"
 
 namespace RPL::Meta {
 /**
@@ -47,7 +47,7 @@ struct DefaultProtocol {
    * 必须提供静态 calc 函数: static uint16_t calc(const void* data, size_t len,
    * uint16_t init = ...); 默认使用 RoboMaster 标准 CRC16
    */
-  using CRC = RPL::ProtocolCRC16;
+  using RPL_CRC = RPL::ProtocolCRC16;
 
   // --- 长度获取策略 ---
   /**

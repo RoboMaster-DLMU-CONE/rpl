@@ -9,7 +9,7 @@
  */
 struct CustomRobotData
 {
-    uint8_t[30] data; ///< 自定义数据段
+    uint8_t data[30]; ///< 自定义数据段
 } __attribute__((packed));
 
 template <>
