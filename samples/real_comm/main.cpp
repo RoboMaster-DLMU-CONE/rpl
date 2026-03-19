@@ -12,7 +12,7 @@
 #include <ranges>
 #include <span>
 
-std::string print_remote(const RPL::Packets::VT03RemotePacket &packet) {
+std::string print_remote(const VT03RemotePacket &packet) {
   return std::format("x1: {}, y1: {}, x2: {}, y2: {}", packet.left_stick_x,
                      packet.left_stick_y, packet.right_stick_x,
                      packet.right_stick_y);
@@ -36,8 +36,7 @@ std::string print_sample_b(const SampleB &sample) {
 static constexpr auto DEVICE_PATH = "/dev/ttyUSB0";
 
 int main() {
-  RPL::Deserializer<CustomControllerData, RPL::Packets::VT03RemotePacket>
-      deserializer;
+  RPL::Deserializer<CustomControllerData, VT03RemotePacket> deserializer;
   RPL::Parser parser{deserializer};
   RPL::Serializer<SampleB> serializer;
 
@@ -82,7 +81,7 @@ int main() {
     serial->send({std::span(reinterpret_cast<const std::byte *>(buffer.data()),
                             res.value())});
     auto cc_packet = deserializer.get<CustomControllerData>();
-    auto vt_packet = deserializer.get<RPL::Packets::VT03RemotePacket>();
+    auto vt_packet = deserializer.get<VT03RemotePacket>();
     std::cout << print_cc(cc_packet) << std::endl;
     std::cout << print_remote(vt_packet) << std::endl;
     // std::cout << print_sample_b(packet_send) << std::endl;

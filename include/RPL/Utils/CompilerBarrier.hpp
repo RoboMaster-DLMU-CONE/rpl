@@ -3,7 +3,6 @@
 
 namespace RPL {
 #ifndef compiler_barrier
-#define
 inline void compiler_barrier() noexcept {
 #if defined(_MSC_VER)
   _ReadWriteBarrier();
@@ -11,7 +10,7 @@ inline void compiler_barrier() noexcept {
   asm volatile("" ::: "memory");
 #endif
 }
- // namespace RPL
+// namespace RPL
 #endif
-}
+} // namespace RPL
 #endif // RPL_COMPILER_BARRIER_HPP
