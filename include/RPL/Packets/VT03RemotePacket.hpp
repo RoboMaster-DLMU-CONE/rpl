@@ -3,11 +3,6 @@
 
 #include "RPL/Meta/PacketTraits.hpp"
 #include "RPL/Utils/Def.hpp"
-#include <array>
-#include <bit>
-#include <cstdint>
-
-namespace RPL::Packets {
 
 struct VT03RemoteProtocol {
   // --- 帧头识别 ---
@@ -95,15 +90,11 @@ struct VT03RemotePacket {
   uint16_t key_v : 1;     ///< bit 14
   uint16_t key_b : 1;     ///< bit 15
 } __attribute__((packed));
-} // namespace RPL::Packets
 
-// --- 特化 PacketTraits ---
-namespace RPL::Meta {
 template <>
-struct PacketTraits<Packets::VT03RemotePacket>
-    : PacketTraitsBase<Packets::VT03RemotePacket> {
-  using Protocol = Packets::VT03RemoteProtocol;
+struct RPL::Meta::PacketTraits<VT03RemotePacket>
+    : PacketTraitsBase<VT03RemotePacket> {
+  using Protocol = VT03RemoteProtocol;
 };
-} // namespace RPL::Meta
 
 #endif // RPL_PACKETS_VT03_REMOTE_PACKET_HPP
