@@ -4,6 +4,7 @@
  *
  * 此文件包含Parser类的定义，该类用于解析流式数据包。
  * 支持分片接收、噪声容错和并发多包处理。
+ * 支持可选的连接健康检测功能。
  *
  * @author WindWeaver
  */
@@ -14,6 +15,7 @@
 #include "Containers/BipBuffer.hpp"
 #include "Deserializer.hpp"
 #include "Meta/PacketTraits.hpp"
+#include "Utils/ConnectionMonitor.hpp"
 #include "Utils/Def.hpp"
 #include "Utils/Error.hpp"
 #include <algorithm>
@@ -64,6 +66,45 @@ constexpr void runtime_get(size_t i, Tuple &&t, Fn &&f) {
                std::make_index_sequence<
                    std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
 }
+
+// --- ConnectionMonitor 检测工具 ---
+// 检查类型是否有 PacketTraits 特化 (即是否是数据包类型)
+template <typename T>
+concept IsPacketType = requires {
+  { Meta::PacketTraits<T>::cmd } -> std::convertible_to<uint16_t>;
+  { Meta::PacketTraits<T>::size } -> std::convertible_to<size_t>;
+};
+
+// 检查类型是否是 ConnectionMonitor (满足 concept 且不是 Packet)
+template <typename T>
+struct IsConnectionMonitor : std::bool_constant<ConnectionMonitorConcept<T> &&
+                                                !IsPacketType<T>> {};
+
+// 从模板参数中提取 Monitor 和 Packets
+template <typename... Args> struct ExtractMonitorAndPackets;
+
+// 情况1: 第一个参数是 ConnectionMonitor
+template <typename M, typename... Ps>
+  requires IsConnectionMonitor<M>::value
+struct ExtractMonitorAndPackets<M, Ps...> {
+  using Monitor = M;
+  using Packets = TypeList<Ps...>;
+};
+
+// 情况2: 第一个参数不是 ConnectionMonitor (全部是 Packet)
+template <typename... Ps>
+  requires(sizeof...(Ps) > 0 && !IsConnectionMonitor<
+                                    std::tuple_element_t<0, std::tuple<Ps...>>>::value)
+struct ExtractMonitorAndPackets<Ps...> {
+  using Monitor = NullConnectionMonitor;
+  using Packets = TypeList<Ps...>;
+};
+
+// 特殊情况: 空参数列表
+template <> struct ExtractMonitorAndPackets<> {
+  using Monitor = NullConnectionMonitor;
+  using Packets = TypeList<>;
+};
 } // namespace Details
 
 /**
@@ -71,125 +112,172 @@ constexpr void runtime_get(size_t i, Tuple &&t, Fn &&f) {
  *
  * 用于解析流式数据包，支持多协议混合解析。
  * 根据 PacketTraits 中定义的 Protocol 自动生成查找表和解析逻辑。
+ * 支持可选的连接监控功能。
  *
- * @tparam Ts 可解析的数据包类型列表
+ * @tparam Args 模板参数列表，可以是:
+ *              - 仅数据包类型: Parser<PacketA, PacketB>
+ *              - ConnectionMonitor + 数据包类型: Parser<Monitor, PacketA, PacketB>
+ *
+ * @code
+ * // 方式1: 无监控 (零开销)
+ * RPL::Parser<SampleA, SampleB> parser{deserializer};
+ *
+ * // 方式2: 使用内置 Tick 监控器
+ * struct HALTickProvider {
+ *     using tick_type = uint32_t;
+ *     static tick_type now() { return HAL_GetTick(); }
+ * };
+ * using Monitor = RPL::TickConnectionMonitor<HALTickProvider>;
+ * RPL::Parser<Monitor, SampleA, SampleB> parser{deserializer};
+ *
+ * if (!parser.get_connection_monitor().is_connected(100)) {
+ *     // 超过 100ms 未收到数据
+ * }
+ * @endcode
  */
-template <typename... Ts> class Parser {
-  // --- 1. 定义解析 Worker ---
-  // 每个 Worker 负责处理一种特定的协议配置
-  // 如果是动态命令码协议(RoboMaster)，CmdId 和 DataSize 为 0 (未使用)
-  // 如果是固定协议(新遥控)，CmdId 和 DataSize 为具体值
-  template <typename P, bool IsFixed, uint16_t CmdId, size_t DataSize>
-  struct ProtocolWorker {
-    using Protocol = P;
-    static constexpr bool is_fixed = IsFixed;
-    static constexpr uint16_t fixed_cmd = CmdId;
-    static constexpr size_t fixed_size = DataSize;
+template <typename... Args> class Parser {
+  // 提取 Monitor 和 Packet 类型
+  using Extracted = Details::ExtractMonitorAndPackets<Args...>;
+  using MonitorType = typename Extracted::Monitor;
 
-    static constexpr size_t min_frame_size =
-        P::header_size + (IsFixed ? DataSize : 0) + P::tail_size;
-  };
+  // 从 TypeList 展开 Packet 类型的辅助模板
+  template <typename PacketList> struct ParserImpl;
 
-  // --- 2. 为每个 T 提取 Worker 类型 ---
-  template <typename T> struct GetWorker {
-    using P = typename Meta::PacketTraits<T>::Protocol;
-    static constexpr bool IsFixed = !P::has_cmd_field;
-    // 如果是固定协议，必须绑定具体的 CMD 和 Size
-    // 如果是动态协议，这些参数不影响 Worker 类型（归一化为 0）
-    static constexpr uint16_t C = IsFixed ? Meta::PacketTraits<T>::cmd : 0;
-    static constexpr size_t S = IsFixed ? Meta::PacketTraits<T>::size : 0;
-    using type = ProtocolWorker<P, IsFixed, C, S>;
-  };
+  template <typename... Ts> struct ParserImpl<Details::TypeList<Ts...>> {
+    // --- 1. 定义解析 Worker ---
+    template <typename P, bool IsFixed, uint16_t CmdId, size_t DataSize>
+    struct ProtocolWorker {
+      using Protocol = P;
+      static constexpr bool is_fixed = IsFixed;
+      static constexpr uint16_t fixed_cmd = CmdId;
+      static constexpr size_t fixed_size = DataSize;
+      static constexpr size_t min_frame_size =
+          P::header_size + (IsFixed ? DataSize : 0) + P::tail_size;
+    };
 
-  // --- 3. 生成去重后的 Worker 列表 ---
-  // 例如：10个 RoboMaster 包 -> 1个 Worker
-  //       1个 新遥控包 -> 1个 Worker
-  template <typename TypeList> struct TupleFromList;
-  template <typename... Ws> struct TupleFromList<Details::TypeList<Ws...>> {
-    using type = std::tuple<Ws...>;
-  };
-
-  using AllWorkers = Details::TypeList<typename GetWorker<Ts>::type...>;
-  using UniqueWorkers = Details::UniqueTypes_t<typename GetWorker<Ts>::type...>;
-  using WorkerTuple = typename TupleFromList<UniqueWorkers>::type;
-
-  // --- 4. 编译期计算 Max Frame Size ---
-  template <typename W> static constexpr size_t get_worker_max_size() {
-    if constexpr (W::is_fixed) {
-      return W::min_frame_size;
-    } else {
-      // 动态协议，取所有使用该协议的 Packet 的最大值
-      return 256 + W::Protocol::header_size + W::Protocol::tail_size;
-    }
-  }
-
-  // 实际上我们需要遍历所有 Ts 来找最大值，比较稳妥
-  static constexpr size_t calculate_max_frame_size() {
-    size_t max = 0;
-    auto check = [&max]<typename T>() {
+    // --- 2. 为每个 T 提取 Worker 类型 ---
+    template <typename T> struct GetWorker {
       using P = typename Meta::PacketTraits<T>::Protocol;
-      size_t size = P::header_size + Meta::PacketTraits<T>::size + P::tail_size;
-      if (size > max)
-        max = size;
+      static constexpr bool IsFixed = !P::has_cmd_field;
+      static constexpr uint16_t C = IsFixed ? Meta::PacketTraits<T>::cmd : 0;
+      static constexpr size_t S = IsFixed ? Meta::PacketTraits<T>::size : 0;
+      using type = ProtocolWorker<P, IsFixed, C, S>;
     };
-    (check.template operator()<Ts>(), ...);
-    return max;
-  }
 
-  static constexpr size_t max_frame_size = calculate_max_frame_size();
+    // --- 3. 生成去重后的 Worker 列表 ---
+    template <typename TypeList> struct TupleFromList;
+    template <typename... Ws>
+    struct TupleFromList<Details::TypeList<Ws...>> {
+      using type = std::tuple<Ws...>;
+    };
 
-  // --- 5. 计算 Buffer Size ---
-  static consteval size_t calculate_buffer_size() {
-    constexpr size_t min_size = max_frame_size * 4;
-    if constexpr (std::has_single_bit(min_size))
-      return min_size;
-    else
-      return std::bit_ceil(min_size);
-  }
-  static constexpr size_t buffer_size = calculate_buffer_size();
+    using AllWorkers = Details::TypeList<typename GetWorker<Ts>::type...>;
+    using UniqueWorkers =
+        Details::UniqueTypes_t<typename GetWorker<Ts>::type...>;
+    using WorkerTuple = typename TupleFromList<UniqueWorkers>::type;
 
-  // --- 成员变量 ---
-  Containers::BipBuffer<buffer_size> buffer;
-  std::array<uint8_t, max_frame_size> parse_buffer{};
-  Deserializer<Ts...> &deserializer;
+    // --- 4. 编译期计算 Max Frame Size ---
+    static constexpr size_t calculate_max_frame_size() {
+      size_t max = 0;
+      auto check = [&max]<typename T>() {
+        using P = typename Meta::PacketTraits<T>::Protocol;
+        size_t size =
+            P::header_size + Meta::PacketTraits<T>::size + P::tail_size;
+        if (size > max)
+          max = size;
+      };
+      (check.template operator()<Ts>(), ...);
+      return max;
+    }
 
-  // --- 6. 构建查找表 (Start Byte -> Worker Index) ---
-  static constexpr auto header_lut = []() {
-    std::array<uint8_t, 256> table;
-    table.fill(0xFF); // 0xFF 表示无效
+    static constexpr size_t max_frame_size = calculate_max_frame_size();
 
-    auto register_worker = [&table]<typename W>(size_t index) {
-      uint8_t sb = W::Protocol::start_byte;
-      // 检查冲突：如果该字节已被占用，且不是同一个 Worker (理论上去重后 index
-      // 唯一) 这里主要防备不同 Worker 使用相同 StartByte
-      if (table[sb] != 0xFF && table[sb] != index) {
-        // Compile-time error force
+    // --- 5. 计算 Buffer Size ---
+    static consteval size_t calculate_buffer_size() {
+      constexpr size_t min_size = max_frame_size * 4;
+      if constexpr (std::has_single_bit(min_size))
+        return min_size;
+      else
+        return std::bit_ceil(min_size);
+    }
+
+    static constexpr size_t buffer_size = calculate_buffer_size();
+
+    // --- 6. 构建查找表 ---
+    static constexpr auto header_lut = []() {
+      std::array<uint8_t, 256> table;
+      table.fill(0xFF);
+
+      auto register_worker = [&table]<typename W>(size_t index) {
+        uint8_t sb = W::Protocol::start_byte;
+        if (table[sb] != 0xFF && table[sb] != index) {
 #ifndef EXCEPTION_DUMP
-        throw "Header collision detected";
+          throw "Header collision detected";
 #else
-        assert(false);
+          assert(false);
 #endif
-      }
-      // assert(table[sb] != 0xFF && table[sb] != index);
-      // TODO: Better comptime exception throwing
-      table[sb] = static_cast<uint8_t>(index);
-    };
+        }
+        table[sb] = static_cast<uint8_t>(index);
+      };
 
-    // 遍历 UniqueWorkers
-    auto helper = [&register_worker]<typename... Ws>(Details::TypeList<Ws...>) {
-      size_t idx = 0;
-      ((register_worker.template operator()<Ws>(idx++)), ...);
-    };
-    helper(UniqueWorkers{});
+      auto helper =
+          [&register_worker]<typename... Ws>(Details::TypeList<Ws...>) {
+            size_t idx = 0;
+            ((register_worker.template operator()<Ws>(idx++)), ...);
+          };
+      helper(UniqueWorkers{});
 
-    return table;
-  }();
+      return table;
+    }();
+
+    using DeserializerType = Deserializer<Ts...>;
+  };
+
+  using Impl = ParserImpl<typename Extracted::Packets>;
+  using WorkerTuple = typename Impl::WorkerTuple;
+  using UniqueWorkers = typename Impl::UniqueWorkers;
+
+  static constexpr size_t max_frame_size = Impl::max_frame_size;
+  static constexpr size_t buffer_size = Impl::buffer_size;
+  static constexpr auto &header_lut = Impl::header_lut;
+
+  // 从 Packets TypeList 中提取 Deserializer 类型
+  template <typename PacketList> struct DeserializerFromPackets;
+  template <typename... Ts>
+  struct DeserializerFromPackets<Details::TypeList<Ts...>> {
+    using type = Deserializer<Ts...>;
+  };
+
+  using DeserializerType =
+      typename DeserializerFromPackets<typename Extracted::Packets>::type;
 
   // 解析结果枚举
   enum class ParseResult { Success, Failure, Incomplete };
 
+  // --- 成员变量 ---
+  Containers::BipBuffer<buffer_size> buffer;
+  std::array<uint8_t, max_frame_size> parse_buffer{};
+  DeserializerType &deserializer;
+  [[no_unique_address]] MonitorType monitor_{};
+
 public:
-  explicit Parser(Deserializer<Ts...> &des) : deserializer(des) {}
+  explicit Parser(DeserializerType &des) : deserializer(des) {}
+
+  /**
+   * @brief 获取连接监控器引用
+   *
+   * @return 连接监控器的引用
+   */
+  MonitorType &get_connection_monitor() noexcept { return monitor_; }
+
+  /**
+   * @brief 获取连接监控器常量引用
+   *
+   * @return 连接监控器的常量引用
+   */
+  const MonitorType &get_connection_monitor() const noexcept {
+    return monitor_;
+  }
 
   tl::expected<void, Error> push_data(const uint8_t *data,
                                       const size_t length) {
@@ -212,7 +300,7 @@ public:
     return try_parse_packets();
   }
 
-  Deserializer<Ts...> &get_deserializer() noexcept { return deserializer; }
+  DeserializerType &get_deserializer() noexcept { return deserializer; }
   size_t available_data() const noexcept { return buffer.available(); }
   size_t available_space() const noexcept { return buffer.space(); }
   bool is_buffer_full() const noexcept { return buffer.full(); }
@@ -262,7 +350,9 @@ public:
             });
 
         if (result == ParseResult::Success) {
-          // 成功，继续下一次大循环（重新获取 view）
+          // 成功解析，通知监控器
+          monitor_.on_packet_received();
+          // 继续下一次大循环（重新获取 view）
           available_bytes = buffer.available();
           frame_handled = true;
           break;
