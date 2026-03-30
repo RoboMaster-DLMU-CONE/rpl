@@ -11,6 +11,7 @@
 #ifndef RPL_SERIALIZER_HPP
 #define RPL_SERIALIZER_HPP
 
+#include "Meta/BitstreamSerializer.hpp"
 #include "Meta/PacketTraits.hpp"
 #include "Utils/Def.hpp"
 #include "Utils/Error.hpp"
@@ -18,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <tl/expected.hpp>
 #include <type_traits>
 #include <variant>
@@ -126,7 +128,14 @@ public:
       }
 
       // 6. Data Payload
-      std::memcpy(current_buffer + Protocol::header_size, &packet, data_size);
+      if constexpr (Meta::HasBitLayout<Meta::PacketTraits<DecayedT>>) {
+        std::memset(current_buffer + Protocol::header_size, 0, data_size);
+        serialize_bitstream<DecayedT>(
+            std::span<uint8_t>(current_buffer + Protocol::header_size, data_size), 
+            packet);
+      } else {
+        std::memcpy(current_buffer + Protocol::header_size, &packet, data_size);
+      }
 
       // 7. Frame Tail (CRC)
       // Use Protocol-specific CRC algorithm

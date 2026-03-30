@@ -12,9 +12,11 @@
 #define RPL_DESERIALIZER_HPP
 
 #include "Containers/MemoryPool.hpp"
+#include "Meta/BitstreamParser.hpp"
 #include "Meta/PacketInfoCollector.hpp"
 #include "Utils/CompilerBarrier.hpp"
 #include <cstring>
+#include <span>
 
 namespace RPL {
 /**
@@ -85,7 +87,12 @@ public:
       auto ptr = reinterpret_cast<uint8_t *>(
           &pool.buffer[Collector::template type_index<T>()]);
       Meta::PacketTraits<T>::before_get(ptr);
-      result = *reinterpret_cast<const T *>(ptr);
+      if constexpr (Meta::HasBitLayout<Meta::PacketTraits<T>>) {
+        result = deserialize_bitstream<T>(
+            std::span<const uint8_t>(ptr, Meta::PacketTraits<T>::size));
+      } else {
+        result = *reinterpret_cast<const T *>(ptr);
+      }
       compiler_barrier();
       v2 = versions_[seq_idx];
     } while (v1 != v2 || (v1 & 1));

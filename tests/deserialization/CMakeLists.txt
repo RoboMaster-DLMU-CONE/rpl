@@ -1,5 +1,11 @@
 # Deserialization Tests CMakeLists.txt
 
+add_executable(test_rpl_bitstream
+    test_bitstream.cpp
+)
+target_link_libraries(test_rpl_bitstream PRIVATE rpl)
+add_test(NAME RPL_Bitstream COMMAND test_rpl_bitstream)
+
 add_executable(test_rpl_deserialization
     test_deserialization.cpp
 )
