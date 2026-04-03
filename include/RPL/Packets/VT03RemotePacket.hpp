@@ -33,62 +33,102 @@ struct VT03RemoteProtocol {
  *
  * 包含遥控器摇杆、按键、鼠标、键盘数据。
  * 数据位压缩存储，总载荷长度 17 字节。
+ *
+ * 字节布局（按协议比特序号，小端序）：
+ * - 字节 0-7: 摇杆 (4x11bit) + 按键 (8bit)
+ * - 字节 8-13: 鼠标 (3x16bit)
+ * - 字节 14: 鼠标按键
+ * - 字节 15-16: 键盘 (16bit)
  */
 struct VT03RemotePacket {
   static constexpr uint16_t cmd = 0xA953; // 使用帧头作为命令码
   static constexpr size_t size = 17;      // 载荷大小
 
-  // --- 字节 0-7 (64 bits) ---
-  // 摇杆通道 (11 bits each)
-  uint64_t right_stick_x : 11;   ///< bit 0-10: 右摇杆水平 (364-1684)
-  uint64_t right_stick_y : 11;   ///< bit 11-21: 右摇杆竖直
-  uint64_t left_stick_y : 11;    ///< bit 22-32: 左摇杆竖直
-  uint64_t left_stick_x : 11;    ///< bit 33-43: 左摇杆水平
-  uint64_t switch_state : 2;     ///< bit 44-45: 挡位开关 (0,1,2)
-  uint64_t pause_btn : 1;        ///< bit 46: 暂停键
-  uint64_t custom_left : 1;      ///< bit 47: 左自定义键
-  uint64_t custom_right : 1;     ///< bit 48: 右自定义键
-  uint64_t wheel : 11;           ///< bit 49-59: 拨轮
-  uint64_t trigger : 1;          ///< bit 60: 扳机
-  uint64_t reserved_padding : 3; ///< bit 61-63: 填充
+  // 原始字节缓冲区 - 使用字节数组确保跨平台一致性
+  uint8_t buffer[17];
 
-  // --- 字节 8-13 (48 bits) ---
-  // Mouse X: Offset 80, Len 16. (Local 64-79).
-  int16_t mouse_x; ///< bit 64-79
-  int16_t mouse_y; ///< bit 80-95
-  int16_t mouse_z; ///< bit 96-111
+  // ========== 访问器方法 - 从原始字节解析 ==========
 
-  // --- 字节 14 (8 bits) ---
-  // Mouse Left: Offset 128, Len 2. (Local 112-113).
-  // Mouse Right: Offset 130, Len 2. (Local 114-115).
-  // Mouse Middle: Offset 132, Len 2. (Local 116-117).
-  // Gap: 134-135 (2 bits).
-  uint8_t mouse_left : 1;       ///< bit 112 (value bit)
-  uint8_t mouse_left_pad : 1;   ///< bit 113 (padding)
-  uint8_t mouse_right : 1;      ///< bit 114
-  uint8_t mouse_right_pad : 1;  ///< bit 115
-  uint8_t mouse_middle : 1;     ///< bit 116
-  uint8_t mouse_middle_pad : 1; ///< bit 117
-  uint8_t mouse_reserved : 2;   ///< bit 118-119 (padding to 120/136)
+  // --- 摇杆 (11-bit, 范围 364-1684, 中位 1024) ---
+  // 小端序位域布局：
+  // right_stick_x: bit 0-10  = 字节 0[0-7] + 字节 1[0-2]
+  // right_stick_y: bit 11-21 = 字节 1[3-7] + 字节 2[0-5]
+  // left_stick_y:  bit 22-32 = 字节 2[6-7] + 字节 3[0-7] + 字节 4[0]
+  // left_stick_x:  bit 33-43 = 字节 4[1-7] + 字节 5[0-3]
+  uint16_t right_stick_x() const {
+    return static_cast<uint16_t>(buffer[0] | ((buffer[1] & 0x07) << 8));
+  }
+  uint16_t right_stick_y() const {
+    return static_cast<uint16_t>((buffer[1] >> 3) | ((buffer[2] & 0x3F) << 5));
+  }
+  uint16_t left_stick_y() const {
+    return static_cast<uint16_t>((buffer[2] >> 6) | (buffer[3] << 2) | ((buffer[4] & 0x01) << 10));
+  }
+  uint16_t left_stick_x() const {
+    return static_cast<uint16_t>((buffer[4] >> 1) | ((buffer[5] & 0x0F) << 7));
+  }
 
-  // --- 字节 15-16 (16 bits) ---
-  // Keyboard: Offset 136, Len 16. (Local 120-135).
-  uint16_t key_w : 1;     ///< bit 0
-  uint16_t key_s : 1;     ///< bit 1
-  uint16_t key_a : 1;     ///< bit 2
-  uint16_t key_d : 1;     ///< bit 3
-  uint16_t key_shift : 1; ///< bit 4
-  uint16_t key_ctrl : 1;  ///< bit 5
-  uint16_t key_q : 1;     ///< bit 6
-  uint16_t key_e : 1;     ///< bit 7
-  uint16_t key_r : 1;     ///< bit 8
-  uint16_t key_f : 1;     ///< bit 9
-  uint16_t key_g : 1;     ///< bit 10
-  uint16_t key_z : 1;     ///< bit 11
-  uint16_t key_x : 1;     ///< bit 12
-  uint16_t key_c : 1;     ///< bit 13
-  uint16_t key_v : 1;     ///< bit 14
-  uint16_t key_b : 1;     ///< bit 15
+  // --- 按键状态 ---
+  uint8_t switch_state() const {
+    return static_cast<uint8_t>((buffer[5] >> 4) & 0x03);
+  }
+  bool pause_btn() const {
+    return (buffer[5] >> 6) & 0x01;
+  }
+  bool custom_left() const {
+    return (buffer[5] >> 7) & 0x01;
+  }
+  bool custom_right() const {
+    return buffer[6] & 0x01;
+  }
+  uint16_t wheel() const {
+    // bit 49-59: 字节 6[1-7] + 字节 7[0-3]
+    return static_cast<uint16_t>((buffer[6] >> 1) | ((buffer[7] & 0x0F) << 7));
+  }
+  bool trigger() const {
+    // bit 60: 字节 7[4]
+    return (buffer[7] >> 4) & 0x01;
+  }
+
+  // --- 鼠标 (16-bit 有符号) ---
+  int16_t mouse_x() const {
+    return static_cast<int16_t>(buffer[8] | (buffer[9] << 8));
+  }
+  int16_t mouse_y() const {
+    return static_cast<int16_t>(buffer[10] | (buffer[11] << 8));
+  }
+  int16_t mouse_z() const {
+    return static_cast<int16_t>(buffer[12] | (buffer[13] << 8));
+  }
+
+  // --- 鼠标按键 ---
+  bool mouse_left() const {
+    return buffer[14] & 0x01;
+  }
+  bool mouse_right() const {
+    return (buffer[14] >> 1) & 0x01;
+  }
+  bool mouse_middle() const {
+    return (buffer[14] >> 2) & 0x01;
+  }
+
+  // --- 键盘按键 (字节 15-16) ---
+  bool key_w() const { return buffer[15] & 0x01; }
+  bool key_s() const { return (buffer[15] >> 1) & 0x01; }
+  bool key_a() const { return (buffer[15] >> 2) & 0x01; }
+  bool key_d() const { return (buffer[15] >> 3) & 0x01; }
+  bool key_shift() const { return (buffer[15] >> 4) & 0x01; }
+  bool key_ctrl() const { return (buffer[15] >> 5) & 0x01; }
+  bool key_q() const { return (buffer[15] >> 6) & 0x01; }
+  bool key_e() const { return (buffer[15] >> 7) & 0x01; }
+  bool key_r() const { return buffer[16] & 0x01; }
+  bool key_f() const { return (buffer[16] >> 1) & 0x01; }
+  bool key_g() const { return (buffer[16] >> 2) & 0x01; }
+  bool key_z() const { return (buffer[16] >> 3) & 0x01; }
+  bool key_x() const { return (buffer[16] >> 4) & 0x01; }
+  bool key_c() const { return (buffer[16] >> 5) & 0x01; }
+  bool key_v() const { return (buffer[16] >> 6) & 0x01; }
+  bool key_b() const { return (buffer[16] >> 7) & 0x01; }
 } __attribute__((packed));
 
 template <>
