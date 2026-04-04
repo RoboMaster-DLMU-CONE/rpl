@@ -255,7 +255,6 @@ template <typename... Args> class Parser {
 
   // --- 成员变量 ---
   Containers::BipBuffer<buffer_size> buffer;
-  std::array<uint8_t, max_frame_size> parse_buffer{};
   DeserializerType &deserializer;
   [[no_unique_address]] MonitorType monitor_{};
 
@@ -308,8 +307,7 @@ public:
   tl::expected<void, Error> try_parse_packets() {
     size_t available_bytes = buffer.available();
 
-    // 最小帧头长度，为了安全起见取最小的一个，或者简单的 1 (只要有 start byte
-    // 就能查表) 实际解析中会检查具体 Protocol 的 header_size
+    // 只要有数据就开始扫描
     while (available_bytes > 0) {
       const auto buffer_view = buffer.get_contiguous_read_buffer();
       const uint8_t *data_ptr = buffer_view.data();
@@ -328,8 +326,7 @@ public:
           continue;
         }
 
-        // 找到潜在帧头，调用对应的 Worker
-        // 需要先丢弃这一段之前的垃圾数据
+        // 找到潜在帧头，丢弃之前的垃圾数据
         if (scan_offset > 0) {
           buffer.discard(scan_offset);
           available_bytes -= scan_offset;
@@ -337,28 +334,22 @@ public:
 
         ParseResult result = ParseResult::Incomplete;
 
-        // 将剩余视图传递给 parse_frame_impl 以进行优化
-        auto current_view = buffer_view.subspan(scan_offset);
-
         // 使用 tuple_switch 动态分发到编译期生成的 Worker
-        Details::runtime_get(
-            worker_idx, WorkerTuple{}, [&](auto worker_instance) {
-              using WorkerType = decltype(worker_instance);
-              result = this->parse_frame_impl<WorkerType>(current_view);
-            });
+        Details::runtime_get(worker_idx, WorkerTuple{},
+                             [&](auto worker_instance) {
+                               using WorkerType = decltype(worker_instance);
+                               result = this->parse_frame_impl<WorkerType>();
+                             });
 
         if (result == ParseResult::Success) {
-          // 成功解析，通知监控器
           monitor_.on_packet_received();
-          // 继续下一次大循环（重新获取 view）
           available_bytes = buffer.available();
           frame_handled = true;
           break;
         } else if (result == ParseResult::Failure) {
-          // 失败，丢弃 1 字节（Start Byte），继续扫描
+          // 失败，丢弃起始字节，继续扫描
           buffer.discard(1);
           available_bytes--;
-          // 重新获取 view 指针位置
           frame_handled = true;
           break;
         } else {
@@ -368,13 +359,10 @@ public:
       }
 
       if (!frame_handled) {
-        // 当前 view 扫描完了都没找到，或者最后剩下的一点不够
-        // 如果 scan_offset == view_size，说明全是垃圾，已全部丢弃
         if (scan_offset == view_size) {
           buffer.discard(view_size);
           available_bytes -= view_size;
         }
-        // 如果 available 还有数据 (Wrap around 的情况)，继续大循环
         if (available_bytes == 0)
           break;
       }
@@ -384,125 +372,97 @@ public:
 
 private:
   // --- 通用帧解析实现 ---
-  template <typename Worker>
-  ParseResult parse_frame_impl(std::span<const uint8_t> view) {
+  template <typename Worker> ParseResult parse_frame_impl() {
     using P = typename Worker::Protocol;
 
-    // 检查数据量是否足够读取帧头
     if (buffer.available() < P::header_size)
       return ParseResult::Incomplete;
 
-    // 读取帧头
-    const uint8_t *header_ptr = nullptr;
-    std::array<uint8_t, P::header_size> header_copy;
+    // 读取并解析帧头 (处理跨越边界情况)
+    uint8_t header_copy[P::header_size];
+    buffer.peek(header_copy, 0, P::header_size);
 
-    if (view.size() >= P::header_size) {
-      header_ptr = view.data();
-    } else {
-      if (!buffer.peek(header_copy.data(), 0, P::header_size))
-        return ParseResult::Incomplete;
-      header_ptr = header_copy.data();
-    }
-
-    // 验证 Second Byte (如果有)
     if constexpr (P::has_second_byte) {
-      if (header_ptr[1] != P::second_byte)
+      if (header_copy[1] != P::second_byte)
         return ParseResult::Failure;
     }
 
-    // 验证 Header CRC (如果有)
     if constexpr (P::has_header_crc) {
-      if (RPL::ProtocolCRC8::calc(header_ptr, 4) != header_ptr[4])
+      if (RPL::ProtocolCRC8::calc(header_copy, 4) != header_copy[4])
         return ParseResult::Failure;
     }
 
-    // 获取 Payload Length 和 CMD
     size_t data_len = 0;
     uint16_t cmd_id = 0;
 
-    // 获取长度
     if constexpr (Worker::is_fixed) {
       data_len = Worker::fixed_size;
+      cmd_id = Worker::fixed_cmd;
     } else {
       if constexpr (P::length_field_bytes == 2) {
-        std::memcpy(&data_len, header_ptr + P::length_offset, 2);
+        std::memcpy(&data_len, header_copy + P::length_offset, 2);
       } else {
-        data_len = header_ptr[P::length_offset];
+        data_len = header_copy[P::length_offset];
       }
-
+      if constexpr (P::cmd_field_bytes == 2) {
+        std::memcpy(&cmd_id, header_copy + P::cmd_offset, 2);
+      }
       if (data_len > max_frame_size - P::header_size - P::tail_size)
         return ParseResult::Failure;
     }
 
-    // 获取 CMD
-    if constexpr (Worker::is_fixed) {
-      cmd_id = Worker::fixed_cmd;
-    } else {
-      if constexpr (P::cmd_field_bytes == 2) {
-        std::memcpy(&cmd_id, header_ptr + P::cmd_offset, 2);
-      } else {
-        // 处理其他大小
-      }
-    }
-
-    // 检查总长度是否足够
     size_t total_len = P::header_size + data_len + P::tail_size;
     if (buffer.available() < total_len)
       return ParseResult::Incomplete;
 
-    // --- 快速路径: 全都在 view 中 (Zero Copy) ---
-    if (view.size() >= total_len) {
-      const uint8_t *frame_start = view.data();
+    // 获取分段读视图，进行分段 CRC 校验
+    auto [s1, s2] = buffer.get_read_spans(0, total_len);
 
-      // 验证整包 CRC
-      size_t calc_len = total_len - P::tail_size;
-      uint16_t calc_crc = P::RPL_CRC::calc(frame_start, calc_len);
+    size_t calc_len = total_len - P::tail_size;
+    uint16_t calc_crc = 0;
 
-      uint16_t recv_crc = 0;
-      std::memcpy(&recv_crc, frame_start + calc_len, 2);
-
-      if (calc_crc != recv_crc)
-        return ParseResult::Failure;
-
-      // 反序列化
-      buffer.discard(P::header_size);
-
-      // discard 不会使 view 指针失效（如果未发生回绕），
-      // 但内部缓冲区状态会改变。
-      // frame_start 指向头部起始。
-      // 数据起始 = frame_start + P::header_size
-
-      deserializer.write(cmd_id, frame_start + P::header_size, data_len);
-
-      // 丢弃数据和帧尾
-      buffer.discard(data_len + P::tail_size);
-      return ParseResult::Success;
+    if (calc_len <= s1.size()) {
+      calc_crc = P::RPL_CRC::calc(s1.data(), calc_len);
+    } else {
+      calc_crc = P::RPL_CRC::calc(s1.data(), s1.size());
+      calc_crc = P::RPL_CRC::calc(s2.data(), calc_len - s1.size(), calc_crc);
     }
 
-    // --- 慢速路径: 跨越边界 (分包) ---
-    // 必须拷贝到连续内存进行 CRC 和解析
-    // 复用 parse_buffer
-
-    if (!buffer.peek(parse_buffer.data(), 0, total_len))
-      return ParseResult::Incomplete;
-
-    // 验证整包 CRC
-    size_t calc_len = total_len - P::tail_size;
-    uint16_t calc_crc = P::RPL_CRC::calc(parse_buffer.data(), calc_len);
-
+    // 验证接收到的 CRC
     uint16_t recv_crc = 0;
-    std::memcpy(&recv_crc, parse_buffer.data() + calc_len, 2);
+    if (calc_len + 2 <= s1.size()) {
+      std::memcpy(&recv_crc, s1.data() + calc_len, 2);
+    } else if (calc_len >= s1.size()) {
+      std::memcpy(&recv_crc, s2.data() + (calc_len - s1.size()), 2);
+    } else {
+      // CRC 跨越了 A/B 边界
+      recv_crc =
+          s1.data()[calc_len] | (static_cast<uint16_t>(s2.data()[0]) << 8);
+    }
 
     if (calc_crc != recv_crc)
       return ParseResult::Failure;
 
-    // 反序列化
-    buffer.discard(P::header_size);
+    // 反序列化 (分段拷贝)
+    std::span<const uint8_t> payload_s1, payload_s2;
 
-    deserializer.write(cmd_id, parse_buffer.data() + P::header_size, data_len);
-    buffer.discard(data_len);
+    if (P::header_size < s1.size()) {
+      payload_s1 = s1.subspan(P::header_size);
+      if (payload_s1.size() >= data_len) {
+        payload_s1 = payload_s1.subspan(0, data_len);
+        // payload_s2 为空
+      } else {
+        payload_s2 = s2.subspan(0, data_len - payload_s1.size());
+      }
+    } else {
+      // Payload 完全在 s2 中
+      payload_s2 = s2.subspan(P::header_size - s1.size(), data_len);
+    }
 
-    buffer.discard(P::tail_size);
+    deserializer.write_segmented(cmd_id, payload_s1, payload_s2);
+
+    // 统一丢弃
+    buffer.discard(total_len);
     return ParseResult::Success;
   }
 };

@@ -67,6 +67,37 @@ public:
   }
 
   /**
+   * @brief 分段 SeqLock 写入方法
+   *
+   * 用于处理跨越 BipBuffer 边界的数据包，避免中间拷贝。
+   *
+   * @param cmd 命令码
+   * @param s1 第一段数据
+   * @param s2 第二段数据
+   */
+  void write_segmented(uint16_t cmd, std::span<const uint8_t> s1,
+                       std::span<const uint8_t> s2) noexcept {
+    const auto byte_offset = Collector::cmd_index(cmd);
+    if (byte_offset == static_cast<size_t>(-1))
+      return;
+    const auto seq_idx = Collector::cmd_seq_index(cmd);
+
+    versions_[seq_idx] = versions_[seq_idx] + 1;
+    compiler_barrier();
+
+    uint8_t *dest = reinterpret_cast<uint8_t *>(&pool.buffer[byte_offset]);
+    if (!s1.empty()) {
+      std::memcpy(dest, s1.data(), s1.size());
+    }
+    if (!s2.empty()) {
+      std::memcpy(dest + s1.size(), s2.data(), s2.size());
+    }
+
+    compiler_barrier();
+    versions_[seq_idx] = versions_[seq_idx] + 1;
+  }
+
+  /**
    * @brief 获取指定类型的数据包（SeqLock 读循环）
    *
    * 从内存池中获取指定类型的反序列化数据包，

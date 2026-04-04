@@ -76,6 +76,8 @@ public:
 
     // 缓冲区已满
     return {};
+
+    // TODO: 接收模板参数，判断是否足够容纳数据包
   }
 
   /**
@@ -202,28 +204,70 @@ public:
 
   /**
    * @brief 丢弃数据 (推进读取索引)
+   * 支持跨区域丢弃
    */
   bool discard(size_t length) {
     if (length == 0)
       return true;
-    if (length > region_a_size)
+    if (length > available())
       return false;
 
-    region_a_start += length;
-    region_a_size -= length;
+    if (length <= region_a_size) {
+      region_a_start += length;
+      region_a_size -= length;
+    } else {
+      // 跨越到区域 B
+      size_t remaining_from_b = length - region_a_size;
+      region_a_start = 0;
+      region_a_size = 0; // 临时清空 A，触发下面的 B 提升
+      region_b_size -= remaining_from_b;
+      // 将 B 提升为 A，起始位置移动到 B 被扣除后的新起点
+      // 注意：B 始终从 0 开始增长。扣除 B 的头部后，新的 A 应该从
+      // remaining_from_b 开始。
+      region_a_start = remaining_from_b;
+      region_a_size = region_b_size;
+      region_b_size = 0;
+    }
 
-    // 如果 A 为空，将 B 提升为 A
+    // 如果 A 为空且 B 为空，重置到 0
     if (region_a_size == 0) {
       if (region_b_size > 0) {
-        region_a_start = 0; // B 始终从 0 开始
+        region_a_start = 0;
         region_a_size = region_b_size;
         region_b_size = 0;
       } else {
-        // 为空时重置到 0 以保持整洁
         region_a_start = 0;
       }
     }
     return true;
+  }
+
+  /**
+   * @brief 获取两个连续的读视图 (用于零拷贝分段处理)
+   *
+   * @param offset 相对于 available 数据的偏移量
+   * @param length 长度
+   * @return std::pair 包含两个 span。如果数据是连续的，第二个 span 为空。
+   */
+  [[nodiscard]] std::pair<std::span<const uint8_t>, std::span<const uint8_t>>
+  get_read_spans(size_t offset, size_t length) const noexcept {
+    if (offset + length > available())
+      return {{}, {}};
+
+    if (offset < region_a_size) {
+      size_t a_readable = region_a_size - offset;
+      if (length <= a_readable) {
+        // 全在 A 中
+        return {{buffer + region_a_start + offset, length}, {}};
+      } else {
+        // 跨越 A 和 B
+        return {{buffer + region_a_start + offset, a_readable},
+                {buffer, length - a_readable}};
+      }
+    } else {
+      // 全在 B 中
+      return {{buffer + (offset - region_a_size), length}, {}};
+    }
   }
 
   // 便捷方法
