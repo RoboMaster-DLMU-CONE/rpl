@@ -10,7 +10,7 @@
 #include <algorithm>
 
 using namespace RPL;
-using namespace RPL::Packets;
+using namespace RPL;
 
 void test_mixed_protocol_parsing() {
     std::cout << "Test: Mixed Protocol Parsing..." << std::endl;

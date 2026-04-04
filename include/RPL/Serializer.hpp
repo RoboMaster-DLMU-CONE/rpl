@@ -11,6 +11,7 @@
 #ifndef RPL_SERIALIZER_HPP
 #define RPL_SERIALIZER_HPP
 
+#include "Meta/BitstreamSerializer.hpp"
 #include "Meta/PacketTraits.hpp"
 #include "Utils/Def.hpp"
 #include "Utils/Error.hpp"
@@ -18,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <tl/expected.hpp>
 #include <type_traits>
 #include <variant>
@@ -75,16 +77,16 @@ public:
 
       uint8_t *current_buffer = buffer + offset;
 
-      // 1. Frame Header (Start Byte(s))
+      // 帧头 (起始字节)
       current_buffer[0] = Protocol::start_byte;
       if constexpr (Protocol::has_second_byte) {
         current_buffer[1] = Protocol::second_byte;
       }
 
-      // 2. Length Field
+      // 长度字段
       if constexpr (Protocol::has_length_field) {
         const auto data_size_u16 = static_cast<uint16_t>(data_size);
-        // Assuming little-endian for length field
+        // 长度字段采用小端格式
         if constexpr (Protocol::length_field_bytes == 1) {
           current_buffer[Protocol::length_offset] =
               static_cast<uint8_t>(data_size_u16 & 0xFF);
@@ -96,24 +98,24 @@ public:
         }
       }
 
-      // 3. Sequence Field
+      // Sequence 字段
       if constexpr (requires { Protocol::has_seq_field; }) {
         if constexpr (Protocol::has_seq_field) {
           current_buffer[Protocol::seq_offset] = m_Sequence;
         }
       }
 
-      // 4. Header CRC
+      // 帧头 CRC
       if constexpr (Protocol::has_header_crc) {
-        // CRC8 covers bytes from 0 to header_crc_offset
+        // CRC8 覆盖从 0 到 header_crc_offset 的字节
         const uint8_t header_crc8 =
             ProtocolCRC8::calc(current_buffer, Protocol::header_crc_offset);
         current_buffer[Protocol::header_crc_offset] = header_crc8;
       }
 
-      // 5. Command ID Field
+      // 命令 ID 字段
       if constexpr (Protocol::has_cmd_field) {
-        // Assuming little-endian for cmd field
+        // 命令字段采用小端格式
         if constexpr (Protocol::cmd_field_bytes == 1) {
           current_buffer[Protocol::cmd_offset] =
               static_cast<uint8_t>(cmd & 0xFF);
@@ -125,16 +127,24 @@ public:
         }
       }
 
-      // 6. Data Payload
-      std::memcpy(current_buffer + Protocol::header_size, &packet, data_size);
+      // Data Payload
+      if constexpr (Meta::HasBitLayout<Meta::PacketTraits<DecayedT>>) {
+        std::memset(current_buffer + Protocol::header_size, 0, data_size);
+        serialize_bitstream<DecayedT>(
+            std::span<uint8_t>(current_buffer + Protocol::header_size,
+                               data_size),
+            packet);
+      } else {
+        std::memcpy(current_buffer + Protocol::header_size, &packet, data_size);
+      }
 
-      // 7. Frame Tail (CRC)
-      // Use Protocol-specific CRC algorithm
+      // 帧尾 (CRC)
+      // 使用协议特定的 CRC 算法
       using FrameCRC = typename Protocol::RPL_CRC;
       const uint16_t frame_crc16 =
           FrameCRC::calc(current_buffer, Protocol::header_size + data_size);
 
-      // Assuming little-endian for CRC16
+      // CRC16 采用小端格式
       current_buffer[Protocol::header_size + data_size] =
           static_cast<uint8_t>(frame_crc16 & 0xFF);
       current_buffer[Protocol::header_size + data_size + 1] =

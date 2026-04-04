@@ -7,7 +7,7 @@
 #include <cstring>
 
 using namespace RPL;
-using namespace RPL::Packets;
+using namespace RPL;
 
 void test_mixed_protocol_serialization() {
     std::cout << "Test: Mixed Protocol Serialization..." << std::endl;

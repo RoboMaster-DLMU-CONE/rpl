@@ -1,5 +1,11 @@
 # Serialization Tests CMakeLists.txt
 
+add_executable(test_rpl_bitstream_serializer
+    test_bitstream_serializer.cpp
+)
+target_link_libraries(test_rpl_bitstream_serializer PRIVATE rpl)
+add_test(NAME RPL_Bitstream_Serializer COMMAND test_rpl_bitstream_serializer)
+
 add_executable(test_rpl_serialization
     test_serialization.cpp
 )
