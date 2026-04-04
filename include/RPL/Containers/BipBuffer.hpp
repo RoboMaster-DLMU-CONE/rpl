@@ -1,11 +1,10 @@
 /**
  * @file BipBuffer.hpp
- * @brief RPL Bipartite Buffer Implementation
+ * @brief RPL 双区缓冲区实现
  *
- * Implements a Bipartite Circular Buffer (BipBuffer) that guarantees contiguous
- * memory access. It maintains two regions (A and B) to handle the wrap-around
- * case by starting a new region at the beginning of the buffer instead of
- * splitting data.
+ * 实现一个双区环形缓冲区 (BipBuffer)，保证连续内存访问。
+ * 它维护两个区域 (A 和 B)，通过在缓冲区起始处开启新区域来处理
+ * 回绕 (wrap-around) 情况，避免数据分裂。
  */
 
 #ifndef RPL_BIPBUFFER_HPP
@@ -20,81 +19,80 @@
 namespace RPL::Containers {
 
 /**
- * @brief Bipartite Buffer class
+ * @brief 双区缓冲区类
  *
- * Guarantees that any readable data chunk is physically contiguous in memory.
- * Eliminates the need for wrap-around checks during parsing.
+ * 保证任何可读数据块在物理内存中是连续的。
+ * 消除了解析时对回绕检查的需要。
  *
- * @tparam SIZE Buffer size, must be power of 2
+ * @tparam SIZE 缓冲区大小，必须是 2 的幂
  */
 template <size_t SIZE> class BipBuffer {
   static_assert((SIZE & (SIZE - 1)) == 0, "SIZE must be a power of 2");
 
   alignas(64) uint8_t buffer[SIZE]{};
 
-  // Region A: The head of the FIFO (data to be read first)
+  // 区域 A: FIFO 的头部 (最先读取的数据)
   size_t region_a_start{0};
   size_t region_a_size{0};
 
-  // Region B: The tail of the FIFO (data to be read after A)
-  // region_b_start is always 0 in this implementation when it exists
+  // 区域 B: FIFO 的尾部 (在 A 之后读取的数据)
+  // 在此实现中，如果存在区域 B，其起始位置始终为 0
   size_t region_b_size{0};
 
 public:
   /**
-   * @brief Get contiguous buffer for writing
+   * @brief 获取连续缓冲区用于写入
    *
-   * Returns the largest contiguous block available for writing.
-   * This may switch to the beginning of the buffer if space at the end is low.
+   * 返回可用于写入的最大连续块。
+   * 如果尾部空间不足，这可能会切换到缓冲区起始处。
    */
   std::span<uint8_t> get_write_buffer() noexcept {
-    // Case 1: We have data in B. We can only append to B.
-    // B always starts at 0 and grows. Space is limited by A's start.
+    // 情况 1: 区域 B 中有数据。只能追加到 B。
+    // B 始终从 0 开始并增长。空间受限于 A 的起始位置。
     if (region_b_size > 0) {
       size_t free_space = region_a_start - region_b_size;
       return {buffer + region_b_size, free_space};
     }
 
-    // Case 2: Only Region A exists (or empty).
-    // We can write after A up to end of buffer.
-    // OR if A exists, we can start B at 0 if A is not at 0.
+    // 情况 2: 仅存在区域 A (或为空)。
+    // 可以在 A 之后写入直到缓冲区末尾。
+    // 或者如果 A 存在且 A 不在 0 位置，可以在 0 处开启 B。
 
-    // 2a: Try appending to A
+    // 2a: 尝试追加到 A
     size_t a_end = region_a_start + region_a_size;
     size_t space_at_end = SIZE - a_end;
 
-    // If we have enough space at end, or if we can't switch to B yet (A starts
-    // at 0), we return the end space. 
+    // 如果尾部有足够空间，或者还不能切换到 B (A 从 0 开始)，返回尾部空间。
 
     if (space_at_end > 0) {
       return {buffer + a_end, space_at_end};
     }
 
-    // 2b: No space at end. Try starting Region B at 0.
-    // Space available is up to region_a_start.
+    // 2b: 尾部无空间。尝试在 0 处开启区域 B。
+    // 可用空间最多到 region_a_start。
     if (region_a_start > 0) {
       return {buffer, region_a_start};
     }
 
-    // Buffer full
+    // 缓冲区已满
     return {};
   }
 
   /**
-   * @brief Reserve space/Commit write
+   * @brief 预留空间/提交写入
    *
-   * @param length Bytes written
-   * @return true if successful
+   * @param length 已写入的字节数
+   * @return true 如果成功
    */
   bool advance_write_index(size_t length) {
     if (length == 0)
       return true;
 
-    // Determine where we wrote based on state
+    // 根据状态确定写入位置
     if (region_b_size > 0) {
-      // Must have written to B
+      // 必定写入到 B
       if (region_b_size + length > region_a_start)
-        return false; // Overflow
+        return false; // 溢出
       region_b_size += length;
       return true;
     }
@@ -107,12 +105,12 @@ public:
     }
 
     if (region_a_size == 0) {
-      // Empty buffer logic
+      // 空缓冲区逻辑
       region_a_size += length;
       return true;
     }
 
-    // If we have space at end, get_write_buffer returns end.
+    // 如果尾部有空间，get_write_buffer 返回尾部。
     if (SIZE - a_end > 0) {
       if (length > SIZE - a_end)
         return false;
@@ -120,8 +118,8 @@ public:
       return true;
     }
 
-    // If no space at end, get_write_buffer returned start.
-    // We create B.
+    // 如果尾部无空间，get_write_buffer 返回起始处。
+    // 我们创建 B。
     if (length > region_a_start)
       return false;
     region_b_size = length;
@@ -129,19 +127,18 @@ public:
   }
 
   /**
-   * @brief Manual switch to Region B (Write from head)
+   * @brief 手动切换到区域 B (从头部写入)
    *
-   * Force the buffer to skip the remaining space at end and start writing at 0.
-   * Useful when the remaining space at end is too small for the incoming
-   * packet.
-   * @return Span at start of buffer (Region B)
+   * 强制缓冲区跳过尾部剩余空间，从 0 位置开始写入。
+   * 当尾部剩余空间太小无法容纳 incoming 数据包时很有用。
+   * @return 缓冲区起始处的 Span (区域 B)
    */
   std::span<uint8_t> get_write_buffer_force_wrap() {
     if (region_b_size > 0) {
-      // Already in B mode, just return B write space
+      // 已经在 B 模式，返回 B 写入空间
       return get_write_buffer();
     }
-    // Force creation of B if possible
+    // 强制创建 B (如果可能)
     if (region_a_start > 0) {
       return {buffer, region_a_start};
     }
@@ -149,13 +146,13 @@ public:
   }
 
   /**
-   * @brief Commit write to forced wrap region
+   * @brief 提交写入到强制回绕区域
    */
   bool advance_write_index_wrapped(size_t length) {
     if (region_b_size > 0) {
       return advance_write_index(length);
     }
-    // Create B
+    // 创建 B
     if (length > region_a_start)
       return false;
     region_b_size = length;
@@ -163,7 +160,7 @@ public:
   }
 
   /**
-   * @brief Copy data into buffer
+   * @brief 复制数据到缓冲区
    */
   bool write(const uint8_t *data, size_t length) {
     if (length == 0)
@@ -171,29 +168,29 @@ public:
 
     auto span = get_write_buffer();
 
-    // Logic: Try to fit in current write region (A or B)
+    // 逻辑: 尝试适配当前写入区域 (A 或 B)
     if (span.size() >= length) {
       std::memcpy(span.data(), data, length);
       return advance_write_index(length);
     }
 
-    // If not, and we are currently writing to A (B is empty),
-    // Check if we can switch to B.
+    // 如果不行，且我们正在写入 A (B 为空)，
+    // 检查是否可以切换到 B。
     if (region_b_size == 0) {
-      // Check space at start
+      // 检查起始处空间
       if (region_a_start >= length) {
-        // Switch to B!
+        // 切换到 B!
         std::memcpy(buffer, data, length);
         region_b_size = length;
         return true;
       }
     }
 
-    return false; // No space contiguous enough
+    return false; // 无足够连续空间
   }
 
   /**
-   * @brief Get contiguous data for reading
+   * @brief 获取连续数据用于读取
    */
   [[nodiscard]] std::span<const uint8_t>
   get_contiguous_read_buffer() const noexcept {
@@ -204,7 +201,7 @@ public:
   }
 
   /**
-   * @brief Discard data (advance read index)
+   * @brief 丢弃数据 (推进读取索引)
    */
   bool discard(size_t length) {
     if (length == 0)
@@ -215,31 +212,30 @@ public:
     region_a_start += length;
     region_a_size -= length;
 
-    // If A is empty, promote B to A
+    // 如果 A 为空，将 B 提升为 A
     if (region_a_size == 0) {
       if (region_b_size > 0) {
-        region_a_start = 0; // B always starts at 0
+        region_a_start = 0; // B 始终从 0 开始
         region_a_size = region_b_size;
         region_b_size = 0;
       } else {
-        // Reset to 0 for cleanliness when empty
+        // 为空时重置到 0 以保持整洁
         region_a_start = 0;
       }
     }
     return true;
   }
 
-  // Convenience methods
+  // 便捷方法
   size_t available() const { return region_a_size + region_b_size; }
 
-  // Space calculation is tricky:
-  // It's max(space_at_end_of_A, space_at_start_before_A) - but logic depends on
-  // state. Roughly:
+  // 空间计算很棘手:
+  // 它是 max(A 尾部空间, A 起始前空间) - 但逻辑取决于状态。大约:
   size_t space() const {
     if (region_b_size > 0)
       return region_a_start - region_b_size;
-    // Max contiguous write? Or total free bytes?
-    // Total free bytes:
+    // 最大连续可写? 还是总空闲字节?
+    // 总空闲字节:
     return (SIZE - (region_a_start + region_a_size)) + region_a_start;
   }
 
@@ -253,25 +249,24 @@ public:
   static constexpr size_t size() { return SIZE; }
 
   /**
-   * @brief Peek (copying if necessary, but BipBuffer logic tries to avoid it)
-   * Note: BipBuffer read structure makes 'peek' across boundary tricky without
-   * copy.
+   * @brief 窥视 (必要时复制，但 BipBuffer 逻辑尽量避免)
+   * 注意: BipBuffer 的读取结构使得跨边界 'peek' 不复制很棘手。
    */
   bool peek(uint8_t *data, size_t offset, size_t length) const {
     if (offset + length > available())
       return false;
 
-    // Reading from A
+    // 从 A 读取
     if (offset < region_a_size) {
       size_t read_from_a = std::min(length, region_a_size - offset);
       std::memcpy(data, buffer + region_a_start + offset, read_from_a);
 
       if (read_from_a < length) {
-        // Remainder from B
+        // 剩余部分从 B 读取
         std::memcpy(data + read_from_a, buffer, length - read_from_a);
       }
     } else {
-      // Reading purely from B
+      // 仅从 B 读取
       size_t offset_in_b = offset - region_a_size;
       std::memcpy(data, buffer + offset_in_b, length);
     }

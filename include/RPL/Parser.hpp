@@ -29,6 +29,8 @@
 
 namespace RPL {
 
+extern void RPL_ERROR_START_BYTE_COLLISION();
+
 namespace Details {
 // --- 类型去重工具 ---
 template <typename... Ts> struct TypeList {};
@@ -77,13 +79,13 @@ concept IsPacketType = requires {
 
 // 检查类型是否是 ConnectionMonitor (满足 concept 且不是 Packet)
 template <typename T>
-struct IsConnectionMonitor : std::bool_constant<ConnectionMonitorConcept<T> &&
-                                                !IsPacketType<T>> {};
+struct IsConnectionMonitor
+    : std::bool_constant<ConnectionMonitorConcept<T> && !IsPacketType<T>> {};
 
 // 从模板参数中提取 Monitor 和 Packets
 template <typename... Args> struct ExtractMonitorAndPackets;
 
-// 情况1: 第一个参数是 ConnectionMonitor
+// 第一个参数是 ConnectionMonitor
 template <typename M, typename... Ps>
   requires IsConnectionMonitor<M>::value
 struct ExtractMonitorAndPackets<M, Ps...> {
@@ -91,16 +93,17 @@ struct ExtractMonitorAndPackets<M, Ps...> {
   using Packets = TypeList<Ps...>;
 };
 
-// 情况2: 第一个参数不是 ConnectionMonitor (全部是 Packet)
+// 第一个参数不是 ConnectionMonitor (全部是 Packet)
 template <typename... Ps>
-  requires(sizeof...(Ps) > 0 && !IsConnectionMonitor<
-                                    std::tuple_element_t<0, std::tuple<Ps...>>>::value)
+  requires(
+      sizeof...(Ps) > 0 &&
+      !IsConnectionMonitor<std::tuple_element_t<0, std::tuple<Ps...>>>::value)
 struct ExtractMonitorAndPackets<Ps...> {
   using Monitor = NullConnectionMonitor;
   using Packets = TypeList<Ps...>;
 };
 
-// 特殊情况: 空参数列表
+// 空参数列表
 template <> struct ExtractMonitorAndPackets<> {
   using Monitor = NullConnectionMonitor;
   using Packets = TypeList<>;
@@ -116,7 +119,8 @@ template <> struct ExtractMonitorAndPackets<> {
  *
  * @tparam Args 模板参数列表，可以是:
  *              - 仅数据包类型: Parser<PacketA, PacketB>
- *              - ConnectionMonitor + 数据包类型: Parser<Monitor, PacketA, PacketB>
+ *              - ConnectionMonitor + 数据包类型: Parser<Monitor, PacketA,
+ * PacketB>
  *
  * @code
  * // 方式1: 无监控 (零开销)
@@ -144,7 +148,7 @@ template <typename... Args> class Parser {
   template <typename PacketList> struct ParserImpl;
 
   template <typename... Ts> struct ParserImpl<Details::TypeList<Ts...>> {
-    // --- 1. 定义解析 Worker ---
+    // --- 解析 Worker ---
     template <typename P, bool IsFixed, uint16_t CmdId, size_t DataSize>
     struct ProtocolWorker {
       using Protocol = P;
@@ -155,7 +159,7 @@ template <typename... Args> class Parser {
           P::header_size + (IsFixed ? DataSize : 0) + P::tail_size;
     };
 
-    // --- 2. 为每个 T 提取 Worker 类型 ---
+    // --- 为每个 T 提取 Worker 类型 ---
     template <typename T> struct GetWorker {
       using P = typename Meta::PacketTraits<T>::Protocol;
       static constexpr bool IsFixed = !P::has_cmd_field;
@@ -164,10 +168,9 @@ template <typename... Args> class Parser {
       using type = ProtocolWorker<P, IsFixed, C, S>;
     };
 
-    // --- 3. 生成去重后的 Worker 列表 ---
+    // --- 生成去重后的 Worker 列表 ---
     template <typename TypeList> struct TupleFromList;
-    template <typename... Ws>
-    struct TupleFromList<Details::TypeList<Ws...>> {
+    template <typename... Ws> struct TupleFromList<Details::TypeList<Ws...>> {
       using type = std::tuple<Ws...>;
     };
 
@@ -176,7 +179,7 @@ template <typename... Args> class Parser {
         Details::UniqueTypes_t<typename GetWorker<Ts>::type...>;
     using WorkerTuple = typename TupleFromList<UniqueWorkers>::type;
 
-    // --- 4. 编译期计算 Max Frame Size ---
+    // --- 编译期计算 Max Frame Size ---
     static constexpr size_t calculate_max_frame_size() {
       size_t max = 0;
       auto check = [&max]<typename T>() {
@@ -192,7 +195,7 @@ template <typename... Args> class Parser {
 
     static constexpr size_t max_frame_size = calculate_max_frame_size();
 
-    // --- 5. 计算 Buffer Size ---
+    // --- 计算 Buffer Size ---
     static consteval size_t calculate_buffer_size() {
       constexpr size_t min_size = max_frame_size * 4;
       if constexpr (std::has_single_bit(min_size))
@@ -203,7 +206,7 @@ template <typename... Args> class Parser {
 
     static constexpr size_t buffer_size = calculate_buffer_size();
 
-    // --- 6. 构建查找表 ---
+    // --- 构建查找表 ---
     static constexpr auto header_lut = []() {
       std::array<uint8_t, 256> table;
       table.fill(0xFF);
@@ -211,11 +214,7 @@ template <typename... Args> class Parser {
       auto register_worker = [&table]<typename W>(size_t index) {
         uint8_t sb = W::Protocol::start_byte;
         if (table[sb] != 0xFF && table[sb] != index) {
-#ifndef EXCEPTION_DUMP
-          throw "Header collision detected";
-#else
-          assert(false);
-#endif
+          RPL_ERROR_START_BYTE_COLLISION();
         }
         table[sb] = static_cast<uint8_t>(index);
       };
@@ -329,17 +328,16 @@ public:
           continue;
         }
 
-        // 找到潜在帧头，尝试调用对应的 Worker
+        // 找到潜在帧头，调用对应的 Worker
         // 需要先丢弃这一段之前的垃圾数据
         if (scan_offset > 0) {
           buffer.discard(scan_offset);
           available_bytes -= scan_offset;
-          // 更新视图（虽然 loop 会 break 但为了逻辑清晰）
         }
 
         ParseResult result = ParseResult::Incomplete;
 
-        // Pass the remaining view to parse_frame_impl for optimization
+        // 将剩余视图传递给 parse_frame_impl 以进行优化
         auto current_view = buffer_view.subspan(scan_offset);
 
         // 使用 tuple_switch 动态分发到编译期生成的 Worker
@@ -361,8 +359,6 @@ public:
           buffer.discard(1);
           available_bytes--;
           // 重新获取 view 指针位置
-          // 简单起见，break 出去重新 get buffer view
-          // 也可以优化为 scan_offset = 0 (因为 discard 移除了数据) 但 view 变了
           frame_handled = true;
           break;
         } else {
@@ -392,11 +388,11 @@ private:
   ParseResult parse_frame_impl(std::span<const uint8_t> view) {
     using P = typename Worker::Protocol;
 
-    // 1. 检查数据量是否足够读取帧头
+    // 检查数据量是否足够读取帧头
     if (buffer.available() < P::header_size)
       return ParseResult::Incomplete;
 
-    // 2. 读取帧头
+    // 读取帧头
     const uint8_t *header_ptr = nullptr;
     std::array<uint8_t, P::header_size> header_copy;
 
@@ -408,23 +404,19 @@ private:
       header_ptr = header_copy.data();
     }
 
-    // 3. 验证 Start Byte (双重检查，虽然 LUT 已经过了)
-    if (header_ptr[0] != P::start_byte)
-      return ParseResult::Failure;
-
-    // 4. 验证 Second Byte (如果有)
+    // 验证 Second Byte (如果有)
     if constexpr (P::has_second_byte) {
       if (header_ptr[1] != P::second_byte)
         return ParseResult::Failure;
     }
 
-    // 5. 验证 Header CRC (如果有)
+    // 验证 Header CRC (如果有)
     if constexpr (P::has_header_crc) {
       if (RPL::ProtocolCRC8::calc(header_ptr, 4) != header_ptr[4])
         return ParseResult::Failure;
     }
 
-    // 6. 获取 Payload Length 和 CMD
+    // 获取 Payload Length 和 CMD
     size_t data_len = 0;
     uint16_t cmd_id = 0;
 
@@ -449,20 +441,20 @@ private:
       if constexpr (P::cmd_field_bytes == 2) {
         std::memcpy(&cmd_id, header_ptr + P::cmd_offset, 2);
       } else {
-        // handle other sizes
+        // 处理其他大小
       }
     }
 
-    // 7. 检查总长度是否足够
+    // 检查总长度是否足够
     size_t total_len = P::header_size + data_len + P::tail_size;
     if (buffer.available() < total_len)
       return ParseResult::Incomplete;
 
-    // --- Fast Path: 全都在 view 中 (Zero Copy) ---
+    // --- 快速路径: 全都在 view 中 (Zero Copy) ---
     if (view.size() >= total_len) {
       const uint8_t *frame_start = view.data();
 
-      // 8. 验证整包 CRC
+      // 验证整包 CRC
       size_t calc_len = total_len - P::tail_size;
       uint16_t calc_crc = P::RPL_CRC::calc(frame_start, calc_len);
 
@@ -472,29 +464,29 @@ private:
       if (calc_crc != recv_crc)
         return ParseResult::Failure;
 
-      // 9. 反序列化
+      // 反序列化
       buffer.discard(P::header_size);
 
-      // discard does not invalidate the view pointer if no wrap occurs,
-      // but internal buffer state changes.
-      // frame_start points to header start.
-      // data start = frame_start + P::header_size
+      // discard 不会使 view 指针失效（如果未发生回绕），
+      // 但内部缓冲区状态会改变。
+      // frame_start 指向头部起始。
+      // 数据起始 = frame_start + P::header_size
 
       deserializer.write(cmd_id, frame_start + P::header_size, data_len);
 
-      // discard data and tail
+      // 丢弃数据和帧尾
       buffer.discard(data_len + P::tail_size);
       return ParseResult::Success;
     }
 
-    // --- Slow Path: 跨越边界 (Split Packet) ---
-    // 必须拷贝到连续内存进行 CRC 和 解析
+    // --- 慢速路径: 跨越边界 (分包) ---
+    // 必须拷贝到连续内存进行 CRC 和解析
     // 复用 parse_buffer
 
     if (!buffer.peek(parse_buffer.data(), 0, total_len))
       return ParseResult::Incomplete;
 
-    // 8. 验证整包 CRC
+    // 验证整包 CRC
     size_t calc_len = total_len - P::tail_size;
     uint16_t calc_crc = P::RPL_CRC::calc(parse_buffer.data(), calc_len);
 
@@ -504,7 +496,7 @@ private:
     if (calc_crc != recv_crc)
       return ParseResult::Failure;
 
-    // 9. 反序列化
+    // 反序列化
     buffer.discard(P::header_size);
 
     deserializer.write(cmd_id, parse_buffer.data() + P::header_size, data_len);

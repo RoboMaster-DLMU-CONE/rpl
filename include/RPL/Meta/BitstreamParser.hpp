@@ -13,17 +13,17 @@
 namespace RPL::Detail {
 
 /**
- * @brief Extract a specific number of bits from a byte span at a specific bit offset
+ * @brief 在特定位偏移处从字节序列中提取指定位数
  *
- * This function handles cross-byte bit extraction with Little-Endian wire format assumptions.
- * Since BitOffset and BitWidth are compile-time constants, the compiler will optimize
- * this into highly efficient bitwise operations.
+ * 此函数处理跨字节位提取，采用小端线格式假设。
+ * 由于 BitOffset 和 BitWidth 是编译时常量，编译器会将此优化
+ * 为高效的位操作。
  *
- * @tparam T The return type (integral)
- * @tparam BitOffset The starting bit index (0 is the LSB of the first byte)
- * @tparam BitWidth The number of bits to extract
- * @param buffer The span of bytes to read from
- * @return The extracted value cast to type T
+ * @tparam T 返回类型 (整数)
+ * @tparam BitOffset 起始位索引 (0 是第一个字节的 LSB)
+ * @tparam BitWidth 要提取的位数
+ * @param buffer 要读取的字节序列
+ * @return 提取的值并转换为类型 T
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr T extract_bits(std::span<const uint8_t> buffer) {
@@ -33,31 +33,31 @@ constexpr T extract_bits(std::span<const uint8_t> buffer) {
     std::size_t current_bit_offset = BitOffset;
     std::size_t bits_extracted = 0;
 
-    // We process byte by byte
+    // 逐字节处理
     while (bits_extracted < BitWidth) {
         std::size_t byte_index = current_bit_offset / 8;
         std::size_t bit_in_byte = current_bit_offset % 8;
-        
-        // How many bits can we take from the current byte?
-        // It's either the remaining bits we need, or the remaining bits in this byte
+
+        // 我们能从当前字节取多少位?
+        // 要么是我们还需要的剩余位，要么是该字节剩余的位
         std::size_t bits_to_take = std::min(BitWidth - bits_extracted, 8 - bit_in_byte);
 
-        // Safety check to avoid out-of-bounds, though typically the buffer should be large enough
+        // 安全检查以避免越界，尽管通常缓冲区应该足够大
         if (byte_index >= buffer.size()) {
             break;
         }
 
         uint8_t byte_val = buffer[byte_index];
-        
-        // Shift down to put our target bits at position 0
+
+        // 下移以将目标位移到位置 0
         byte_val >>= bit_in_byte;
-        
-        // Mask out any upper bits we don't want
+
+        // 屏蔽不需要的上位
         uint8_t mask = (1ULL << bits_to_take) - 1;
         byte_val &= mask;
 
-        // Place these extracted bits into the result at the correct position
-        // Since we extract starting from LSB of the wire format (assuming little-endian bit packing)
+        // 将这些提取的位放入结果中的正确位置
+        // 由于我们从线格式的 LSB 开始提取 (假设小端位打包)
         result |= (static_cast<T>(byte_val) << bits_extracted);
 
         bits_extracted += bits_to_take;
@@ -68,15 +68,15 @@ constexpr T extract_bits(std::span<const uint8_t> buffer) {
 }
 
 /**
- * @brief Core implementation for parsing a bitstream layout into a tuple
+ * @brief 将位流布局解析为元组的核心实现
  */
 template <typename Layout, std::size_t... Is>
 constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_sequence<Is...>) {
-    // Calculate prefix sums for bit offsets at compile time
+    // 在编译期计算位偏移的前缀和
     constexpr auto offsets = []() {
         std::array<std::size_t, sizeof...(Is) + 1> arr{0};
         std::size_t current = 0;
-        // Fold expression to calculate running sum of bits
+        // 折叠表达式计算运行总和
         ((arr[Is + 1] = current += std::tuple_element_t<Is, Layout>::bits), ...);
         return arr;
     }();
@@ -84,7 +84,7 @@ constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_
     return std::make_tuple(
         extract_bits<
             typename std::tuple_element_t<Is, Layout>::type,
-            offsets[Is], 
+            offsets[Is],
             std::tuple_element_t<Is, Layout>::bits
         >(buffer)...
     );
@@ -95,27 +95,27 @@ constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_
 namespace RPL {
 
 /**
- * @brief Deserialize a packet using its BitLayout definition
- * 
- * Extracts bit-fields from the buffer and safely constructs the target struct T
- * using C++20 parenthesized aggregate initialization.
+ * @brief 使用位流布局定义反序列化数据包
  *
- * @tparam T The target structure type
- * @param buffer Byte span containing the wire format data
- * @return The constructed structure with bit-fields correctly initialized
+ * 从缓冲区中提取位域并安全地构造目标结构 T
+ * 使用 C++20 括号聚合初始化。
+ *
+ * @tparam T 目标结构类型
+ * @param buffer 包含线格式数据的字节序列
+ * @return 正确初始化位域的结构
  */
 template <typename T>
 requires Meta::HasBitLayout<Meta::PacketTraits<T>>
 constexpr T deserialize_bitstream(std::span<const uint8_t> buffer) {
     using Layout = typename Meta::PacketTraits<T>::BitLayout;
     constexpr std::size_t N = std::tuple_size_v<Layout>;
-    
-    // 1. Extract values into a tuple based on the compile-time layout
+
+    // 1. 根据编译期布局将值提取到元组中
     auto values_tuple = Detail::parse_bitstream_impl<Layout>(
         buffer, std::make_index_sequence<N>{}
     );
-    
-    // 2. Use C++20 aggregate initialization to perfectly assign to native bit-fields
+
+    // 2. 使用 C++20 聚合初始化完美赋值给原生位域
     return std::make_from_tuple<T>(values_tuple);
 }
 

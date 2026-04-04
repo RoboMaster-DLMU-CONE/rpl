@@ -13,11 +13,11 @@
 namespace RPL::Detail {
 
 /**
- * @brief Inject a specific number of bits into a byte span at a specific bit offset
+ * @brief 在特定位偏移处将指定位数注入到字节序列中
  *
- * This function handles cross-byte bit injection with Little-Endian wire format assumptions.
- * Since BitOffset and BitWidth are compile-time constants, the compiler will optimize
- * this into highly efficient bitwise operations.
+ * 此函数处理跨字节位注入，采用小端线格式假设。
+ * 由于 BitOffset 和 BitWidth 是编译时常量，编译器会将此优化
+ * 为高效的位操作。
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
@@ -34,7 +34,7 @@ constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
     while (bits_injected < BitWidth) {
         std::size_t byte_index = current_bit_offset / 8;
         std::size_t bit_in_byte = current_bit_offset % 8;
-        
+
         std::size_t bits_to_put = std::min(BitWidth - bits_injected, static_cast<std::size_t>(8 - bit_in_byte));
 
         if (byte_index >= buffer.size()) {
@@ -51,11 +51,11 @@ constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
 }
 
 /**
- * @brief Unpacks a struct into a tuple of its members using structured binding.
- * 
- * We use value binding (const auto [ ... ]) instead of reference binding (auto& [ ... ])
- * because binding a reference to a bit-field is ill-formed in C++.
- * This safely copies the bit-field values into a purely standard tuple.
+ * @brief 使用结构化绑定将结构体解包为成员元组
+ *
+ * 我们使用值绑定 (const auto [ ... ]) 而不是引用绑定 (auto& [ ... ])
+ * 因为在 C++ 中绑定引用到位域是非法的。
+ * 这可以安全地将位域值复制到纯标准元组中。
  */
 template <std::size_t N, typename T>
 constexpr auto struct_to_tuple(const T& obj) {
@@ -102,10 +102,10 @@ constexpr auto struct_to_tuple(const T& obj) {
 namespace RPL {
 
 /**
- * @brief Serialize a bitstream-based packet into a pre-zeroed buffer.
- * 
- * Extracts bit-fields from the structure using structured binding and injects
- * them into the byte span at the correct compile-time offsets.
+ * @brief 将基于位流的包序列化到预清零的缓冲区中
+ *
+ * 使用结构化绑定从结构中提取位域并注入
+ * 到字节序列中正确的编译期偏移处。
  */
 template <typename T>
 requires Meta::HasBitLayout<Meta::PacketTraits<T>>
@@ -113,10 +113,10 @@ constexpr void serialize_bitstream(std::span<uint8_t> buffer, const T& packet) {
     using Layout = typename Meta::PacketTraits<T>::BitLayout;
     constexpr std::size_t N = std::tuple_size_v<Layout>;
 
-    // 1. Unpack struct into a tuple by value (safe for bit-fields)
+    // 1. 将结构体解包为值元组 (对位域安全)
     auto values = Detail::struct_to_tuple<N>(packet);
 
-    // Calculate prefix sums for bit offsets at compile time
+    // 在编译期计算位偏移的前缀和
     constexpr auto offsets = []() {
         std::array<std::size_t, N + 1> arr{0};
         std::size_t current = 0;
@@ -126,7 +126,7 @@ constexpr void serialize_bitstream(std::span<uint8_t> buffer, const T& packet) {
         return arr;
     }();
 
-    // 2. Inject each tuple element into the byte span at the compile-time calculated offset
+    // 2. 将每个元组元素注入到字节序列中编译期计算的偏移处
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         (Detail::inject_bits<
             typename std::tuple_element_t<Is, Layout>::type,
