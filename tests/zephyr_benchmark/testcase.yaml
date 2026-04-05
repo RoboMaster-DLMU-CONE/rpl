@@ -1,0 +1,4 @@
+tests:
+  rpl.benchmark.cortex_m:
+    tags: benchmark rpl
+    platform_allow: qemu_cortex_m3
