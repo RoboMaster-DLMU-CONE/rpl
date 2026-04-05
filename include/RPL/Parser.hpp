@@ -229,6 +229,28 @@ template <typename... Args> class Parser {
       return table;
     }();
 
+    static constexpr uint8_t unique_start_byte = []() {
+      uint8_t first_sb = 0xFF;
+      size_t count = 0;
+      for (int i = 0; i < 256; ++i) {
+        if (header_lut[i] != 0xFF) {
+          if (first_sb == 0xFF)
+            first_sb = static_cast<uint8_t>(i);
+          count++;
+        }
+      }
+      return count == 1 ? first_sb : 0xFF;
+    }();
+
+    static constexpr bool has_multiple_start_bytes = []() {
+      size_t count = 0;
+      for (int i = 0; i < 256; ++i) {
+        if (header_lut[i] != 0xFF)
+          count++;
+      }
+      return count > 1;
+    }();
+
     using DeserializerType = Deserializer<Ts...>;
   };
 
@@ -239,6 +261,8 @@ template <typename... Args> class Parser {
   static constexpr size_t max_frame_size = Impl::max_frame_size;
   static constexpr size_t buffer_size = Impl::buffer_size;
   static constexpr auto &header_lut = Impl::header_lut;
+  static constexpr uint8_t unique_start_byte = Impl::unique_start_byte;
+  static constexpr bool has_multiple_start_bytes = Impl::has_multiple_start_bytes;
 
   // 从 Packets TypeList 中提取 Deserializer 类型
   template <typename PacketList> struct DeserializerFromPackets;
@@ -317,13 +341,26 @@ public:
       bool frame_handled = false;
 
       while (scan_offset < view_size) {
-        const uint8_t current_byte = data_ptr[scan_offset];
-        const uint8_t worker_idx = header_lut[current_byte];
+        uint8_t worker_idx = 0xFF;
 
-        if (worker_idx == 0xFF) {
-          // 不是帧头，跳过
-          scan_offset++;
-          continue;
+        if constexpr (unique_start_byte != 0xFF) {
+          const uint8_t *next_sb = static_cast<const uint8_t *>(
+              std::memchr(data_ptr + scan_offset, unique_start_byte,
+                          view_size - scan_offset));
+          if (!next_sb) {
+            scan_offset = view_size;
+            break;
+          }
+          scan_offset = static_cast<size_t>(next_sb - data_ptr);
+          worker_idx = header_lut[unique_start_byte];
+        } else {
+          // 优化多起始字节扫描
+          while (scan_offset < view_size &&
+                 (worker_idx = header_lut[data_ptr[scan_offset]]) == 0xFF) {
+            scan_offset++;
+          }
+          if (scan_offset >= view_size)
+            break;
         }
 
         // 找到潜在帧头，丢弃之前的垃圾数据
@@ -378,17 +415,24 @@ private:
     if (buffer.available() < P::header_size)
       return ParseResult::Incomplete;
 
-    // 读取并解析帧头 (处理跨越边界情况)
-    uint8_t header_copy[P::header_size];
-    buffer.peek(header_copy, 0, P::header_size);
+    // 获取帧头指针，尽量避免拷贝
+    uint8_t header_stack_copy[P::header_size];
+    const uint8_t *header_ptr = nullptr;
+    auto [hs1, hs2] = buffer.get_read_spans(0, P::header_size);
+    if (hs2.empty()) {
+      header_ptr = hs1.data();
+    } else {
+      buffer.peek(header_stack_copy, 0, P::header_size);
+      header_ptr = header_stack_copy;
+    }
 
     if constexpr (P::has_second_byte) {
-      if (header_copy[1] != P::second_byte)
+      if (header_ptr[1] != P::second_byte)
         return ParseResult::Failure;
     }
 
     if constexpr (P::has_header_crc) {
-      if (RPL::ProtocolCRC8::calc(header_copy, 4) != header_copy[4])
+      if (RPL::ProtocolCRC8::calc(header_ptr, 4) != header_ptr[4])
         return ParseResult::Failure;
     }
 
@@ -400,12 +444,12 @@ private:
       cmd_id = Worker::fixed_cmd;
     } else {
       if constexpr (P::length_field_bytes == 2) {
-        std::memcpy(&data_len, header_copy + P::length_offset, 2);
+        std::memcpy(&data_len, header_ptr + P::length_offset, 2);
       } else {
-        data_len = header_copy[P::length_offset];
+        data_len = header_ptr[P::length_offset];
       }
       if constexpr (P::cmd_field_bytes == 2) {
-        std::memcpy(&cmd_id, header_copy + P::cmd_offset, 2);
+        std::memcpy(&cmd_id, header_ptr + P::cmd_offset, 2);
       }
       if (data_len > max_frame_size - P::header_size - P::tail_size)
         return ParseResult::Failure;
