@@ -26,13 +26,13 @@ using StressXLarge = XLargePacket;
 
 using StressSerializer =
     RPL::Serializer<PacketA, PacketB, StressSmall, StressMedium, StressLarge,
-                    StressXLarge>;
+                    StressXLarge, RobotStatus, CrossByteTest>;
 using StressDeserializer =
     RPL::Deserializer<PacketA, PacketB, StressSmall, StressMedium, StressLarge,
-                      StressXLarge>;
+                      StressXLarge, RobotStatus, CrossByteTest>;
 using StressParser =
     RPL::Parser<PacketA, PacketB, StressSmall, StressMedium, StressLarge,
-                StressXLarge>;
+                StressXLarge, RobotStatus, CrossByteTest>;
 
 template <typename Packet>
 static Packet make_packet_pattern(uint8_t seed) {
@@ -141,6 +141,23 @@ static void BM_Serialization_SinglePacket(benchmark::State &state) {
 }
 BENCHMARK(BM_Serialization_SinglePacket);
 
+static void BM_Serialization_Bitfield(benchmark::State &state) {
+  RPL::Serializer<RobotStatus, CrossByteTest> serializer;
+  RobotStatus status{1, 5, 9, 0x1234};
+  CrossByteTest cross{0xABC, 0xDEF, 0x55};
+  constexpr size_t total_size =
+      RPL::Serializer<RobotStatus, CrossByteTest>::frame_size<RobotStatus>() +
+      RPL::Serializer<RobotStatus, CrossByteTest>::frame_size<CrossByteTest>();
+  std::vector<uint8_t> buffer(total_size);
+
+  for (auto _ : state) {
+    auto result =
+        serializer.serialize(buffer.data(), buffer.size(), status, cross);
+    benchmark::DoNotOptimize(result);
+  }
+}
+BENCHMARK(BM_Serialization_Bitfield);
+
 static void BM_Serialization_MultiPacket(benchmark::State &state) {
   RPL::Serializer<PacketA, PacketB> serializer;
   PacketA packet_a{42, -1234, 3.14f, 2.718};
@@ -172,6 +189,25 @@ static void BM_Deserialization_GetPacket(benchmark::State &state) {
 }
 BENCHMARK(BM_Deserialization_GetPacket);
 
+static void BM_Deserialization_Bitfield(benchmark::State &state) {
+  RPL::Deserializer<RobotStatus, CrossByteTest> deserializer;
+  uint8_t buffer_status[] = {0x9B, 0x34, 0x12};
+  uint8_t buffer_cross[] = {0xBC, 0xFA, 0xDE, 0x55};
+
+  deserializer.write(RPL::Meta::PacketTraits<RobotStatus>::cmd, buffer_status,
+                     3);
+  deserializer.write(RPL::Meta::PacketTraits<CrossByteTest>::cmd, buffer_cross,
+                     4);
+
+  for (auto _ : state) {
+    auto p1 = deserializer.get<RobotStatus>();
+    auto p2 = deserializer.get<CrossByteTest>();
+    benchmark::DoNotOptimize(p1);
+    benchmark::DoNotOptimize(p2);
+  }
+}
+BENCHMARK(BM_Deserialization_Bitfield);
+
 // --- Parser Stress Benchmarks ---
 
 class ParserStressFixture : public benchmark::Fixture {
@@ -184,20 +220,26 @@ public:
   StressMedium medium_packet{};
   StressLarge large_packet{};
   StressXLarge xlarge_packet{};
+  RobotStatus robot_status_packet{};
+  CrossByteTest cross_byte_packet{};
 
   std::vector<uint8_t> small_frame;
   std::vector<uint8_t> medium_frame;
   std::vector<uint8_t> large_frame;
   std::vector<uint8_t> xlarge_frame;
+  std::vector<uint8_t> robot_status_frame;
+  std::vector<uint8_t> cross_byte_frame;
   std::vector<uint8_t> burst_small_stream;
   std::vector<uint8_t> burst_mixed_stream;
   std::vector<uint8_t> noisy_stream;
   std::vector<uint8_t> invalid_crc_stream;
   std::vector<uint8_t> mixed_size_stream;
+  std::vector<uint8_t> bitfield_mixed_stream;
 
   static constexpr size_t burst_small_frames = 256;
   static constexpr size_t burst_mixed_frames = 16;
   static constexpr size_t mixed_repeats = 4;
+  static constexpr size_t bitfield_repeats = 32;
 
   void SetUp(const ::benchmark::State &) override {
     small_packet = make_packet_pattern<StressSmall>(0x11);
@@ -205,10 +247,16 @@ public:
     large_packet = make_packet_pattern<StressLarge>(0x33);
     xlarge_packet = make_packet_pattern<StressXLarge>(0x44);
 
+    robot_status_packet = {1, 5, 9, 0x1234};
+    cross_byte_packet = {0xABC, 0xDEF, 0x55};
+
     small_frame = serialize_one(serializer, small_packet);
     medium_frame = serialize_one(serializer, medium_packet);
     large_frame = serialize_one(serializer, large_packet);
     xlarge_frame = serialize_one(serializer, xlarge_packet);
+
+    robot_status_frame = serialize_one(serializer, robot_status_packet);
+    cross_byte_frame = serialize_one(serializer, cross_byte_packet);
 
     burst_small_stream = build_repeated_stream(small_frame, burst_small_frames);
     burst_mixed_stream =
@@ -222,6 +270,16 @@ public:
                                medium_frame.end());
       mixed_size_stream.insert(mixed_size_stream.end(), xlarge_frame.begin(),
                                xlarge_frame.end());
+    }
+
+    bitfield_mixed_stream.clear();
+    for (size_t i = 0; i < bitfield_repeats; ++i) {
+      bitfield_mixed_stream.insert(bitfield_mixed_stream.end(),
+                                   robot_status_frame.begin(),
+                                   robot_status_frame.end());
+      bitfield_mixed_stream.insert(bitfield_mixed_stream.end(),
+                                   cross_byte_frame.begin(),
+                                   cross_byte_frame.end());
     }
 
     noisy_stream.assign(256, 0x5A);
@@ -348,6 +406,16 @@ BENCHMARK_F(ParserStressFixture, Parser_MixedSize_Stream)(benchmark::State &stat
   }
   set_throughput(state, static_cast<int64_t>(mixed_size_stream.size()),
                  static_cast<int64_t>(mixed_repeats * 3));
+}
+
+BENCHMARK_F(ParserStressFixture, Parser_Bitfield_Mixed)(benchmark::State &state) {
+  for (auto _ : state) {
+    auto result =
+        parser.push_data(bitfield_mixed_stream.data(), bitfield_mixed_stream.size());
+    benchmark::DoNotOptimize(result);
+  }
+  set_throughput(state, static_cast<int64_t>(bitfield_mixed_stream.size()),
+                 static_cast<int64_t>(bitfield_repeats * 2));
 }
 
 BENCHMARK_F(ParserStressFixture, Parser_AdvanceWriteIndex_Path)(benchmark::State &state) {
