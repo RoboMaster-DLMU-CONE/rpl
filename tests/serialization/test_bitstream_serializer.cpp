@@ -80,8 +80,44 @@ void test_cross_byte_serialize() {
     std::cout << "test_cross_byte_serialize passed!" << std::endl;
 }
 
+// --- Test 3: Mixed packet with std::array ---
+struct MixedPacket {
+    uint8_t a : 4;
+    uint8_t b : 4;
+    std::array<uint8_t, 2> data;
+};
+
+namespace RPL::Meta {
+    template <>
+    struct PacketTraits<MixedPacket> : PacketTraitsBase<PacketTraits<MixedPacket>> {
+        static constexpr uint16_t cmd = 0x2001;
+        using BitLayout = std::tuple<
+            Field<uint8_t, 4>,
+            Field<uint8_t, 4>,
+            Field<std::array<uint8_t, 2>, 16>
+        >;
+    };
+}
+
+void test_mixed_array_serialize() {
+    MixedPacket p;
+    p.a = 2;
+    p.b = 1;
+    p.data = {0xAA, 0xBB};
+    
+    std::vector<uint8_t> buffer(3, 0);
+    RPL::serialize_bitstream<MixedPacket>(std::span<uint8_t>(buffer), p);
+    
+    if (buffer[0] != 0x12 || buffer[1] != 0xAA || buffer[2] != 0xBB) {
+        std::cerr << "test_mixed_array_serialize failed!" << std::endl;
+        exit(1);
+    }
+    std::cout << "test_mixed_array_serialize passed!" << std::endl;
+}
+
 int main() {
     test_simple_serialize();
     test_cross_byte_serialize();
+    test_mixed_array_serialize();
     return 0;
 }

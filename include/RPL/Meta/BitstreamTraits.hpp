@@ -3,10 +3,21 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <tuple>
 #include <type_traits>
 
 namespace RPL::Meta {
+
+/**
+ * @brief 检查类型是否为 std::array
+ */
+template <typename T>
+struct is_std_array : std::false_type {};
+template <typename T, std::size_t N>
+struct is_std_array<std::array<T, N>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_std_array_v = is_std_array<T>::value;
 
 /**
  * @brief 位流解析的字段描述器
@@ -18,8 +29,9 @@ namespace RPL::Meta {
  */
 template <typename T, std::size_t Bits = sizeof(T) * 8>
 struct Field {
-    static_assert(std::is_integral_v<T>, "Field type must be an integral type");
-    static_assert(Bits > 0 && Bits <= sizeof(T) * 8, "Bits must fit within the specified type T");
+    // We allow integral types or std::array
+    // static_assert(std::is_integral_v<T>, "Field type must be an integral type"); 
+    static_assert(Bits > 0, "Bits must be positive");
 
     using type = T;
     static constexpr std::size_t bits = Bits;

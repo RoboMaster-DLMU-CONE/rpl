@@ -21,32 +21,43 @@ namespace RPL::Detail {
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
-    static_assert(BitWidth <= sizeof(T) * 8, "BitWidth exceeds input type capacity");
+    if constexpr (Meta::is_std_array_v<T>) {
+        using ElementType = typename T::value_type;
+        constexpr std::size_t N = std::tuple_size_v<T>;
+        constexpr std::size_t bits_per_element = BitWidth / N;
+        static_assert(bits_per_element * N == BitWidth, "BitWidth must be a multiple of array size");
+        
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (inject_bits<ElementType, BitOffset + Is * bits_per_element, bits_per_element>(buffer, value[Is]), ...);
+        }(std::make_index_sequence<N>{});
+    } else {
+        static_assert(BitWidth <= sizeof(T) * 8, "BitWidth exceeds input type capacity");
 
-    std::size_t current_bit_offset = BitOffset;
-    std::size_t bits_injected = 0;
+        std::size_t current_bit_offset = BitOffset;
+        std::size_t bits_injected = 0;
 
-    T masked_value = value;
-    if constexpr (BitWidth < sizeof(T) * 8) {
-        masked_value &= (static_cast<T>(1) << BitWidth) - 1;
-    }
-
-    while (bits_injected < BitWidth) {
-        std::size_t byte_index = current_bit_offset / 8;
-        std::size_t bit_in_byte = current_bit_offset % 8;
-
-        std::size_t bits_to_put = std::min(BitWidth - bits_injected, static_cast<std::size_t>(8 - bit_in_byte));
-
-        if (byte_index >= buffer.size()) {
-            break;
+        T masked_value = value;
+        if constexpr (BitWidth < sizeof(T) * 8) {
+            masked_value &= (static_cast<T>(1) << BitWidth) - 1;
         }
 
-        uint8_t chunk = static_cast<uint8_t>((masked_value >> bits_injected) & ((1ULL << bits_to_put) - 1));
-        chunk <<= bit_in_byte;
-        buffer[byte_index] |= chunk;
+        while (bits_injected < BitWidth) {
+            std::size_t byte_index = current_bit_offset / 8;
+            std::size_t bit_in_byte = current_bit_offset % 8;
 
-        bits_injected += bits_to_put;
-        current_bit_offset += bits_to_put;
+            std::size_t bits_to_put = std::min(BitWidth - bits_injected, static_cast<std::size_t>(8 - bit_in_byte));
+
+            if (byte_index >= buffer.size()) {
+                break;
+            }
+
+            uint8_t chunk = static_cast<uint8_t>((masked_value >> bits_injected) & ((1ULL << bits_to_put) - 1));
+            chunk <<= bit_in_byte;
+            buffer[byte_index] |= chunk;
+
+            bits_injected += bits_to_put;
+            current_bit_offset += bits_to_put;
+        }
     }
 }
 

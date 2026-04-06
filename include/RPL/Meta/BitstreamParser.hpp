@@ -27,44 +27,57 @@ namespace RPL::Detail {
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr T extract_bits(std::span<const uint8_t> buffer) {
-    static_assert(BitWidth <= sizeof(T) * 8, "BitWidth exceeds return type capacity");
+    if constexpr (Meta::is_std_array_v<T>) {
+        T result{};
+        using ElementType = typename T::value_type;
+        constexpr std::size_t N = std::tuple_size_v<T>;
+        constexpr std::size_t bits_per_element = BitWidth / N;
+        static_assert(bits_per_element * N == BitWidth, "BitWidth must be a multiple of array size");
+        
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ((result[Is] = extract_bits<ElementType, BitOffset + Is * bits_per_element, bits_per_element>(buffer)), ...);
+        }(std::make_index_sequence<N>{});
+        return result;
+    } else {
+        static_assert(BitWidth <= sizeof(T) * 8, "BitWidth exceeds return type capacity");
 
-    T result = 0;
-    std::size_t current_bit_offset = BitOffset;
-    std::size_t bits_extracted = 0;
+        T result = 0;
+        std::size_t current_bit_offset = BitOffset;
+        std::size_t bits_extracted = 0;
 
-    // 逐字节处理
-    while (bits_extracted < BitWidth) {
-        std::size_t byte_index = current_bit_offset / 8;
-        std::size_t bit_in_byte = current_bit_offset % 8;
+        // 逐字节处理
+        while (bits_extracted < BitWidth) {
+            std::size_t byte_index = current_bit_offset / 8;
+            std::size_t bit_in_byte = current_bit_offset % 8;
 
-        // 我们能从当前字节取多少位?
-        // 要么是我们还需要的剩余位，要么是该字节剩余的位
-        std::size_t bits_to_take = std::min(BitWidth - bits_extracted, 8 - bit_in_byte);
+            // 我们能从当前字节取多少位?
+            // 要么是我们还需要的剩余位，要么是该字节剩余的位
+            std::size_t bits_to_take = std::min(BitWidth - bits_extracted, static_cast<std::size_t>(8 - bit_in_byte));
 
-        // 安全检查以避免越界，尽管通常缓冲区应该足够大
-        if (byte_index >= buffer.size()) {
-            break;
+            // 安全检查以避免越界，尽管通常缓冲区应该足够大
+            if (byte_index >= buffer.size()) {
+                break;
+            }
+
+            uint8_t byte_val = buffer[byte_index];
+
+            // 下移以将目标位移到位置 0
+            byte_val >>= bit_in_byte;
+
+            // 屏蔽不需要的上位
+            uint8_t mask = (1ULL << bits_to_take) - 1;
+            byte_val &= mask;
+
+            // 将这些提取的位放入结果中的正确位置
+            // 由于我们从线格式的 LSB 开始提取 (假设小端位打包)
+            result |= (static_cast<T>(byte_val) << bits_extracted);
+
+            bits_extracted += bits_to_take;
+            current_bit_offset += bits_to_take;
         }
 
-        uint8_t byte_val = buffer[byte_index];
-
-        // 下移以将目标位移到位置 0
-        byte_val >>= bit_in_byte;
-
-        // 屏蔽不需要的上位
-        uint8_t mask = (1ULL << bits_to_take) - 1;
-        byte_val &= mask;
-
-        // 将这些提取的位放入结果中的正确位置
-        // 由于我们从线格式的 LSB 开始提取 (假设小端位打包)
-        result |= (static_cast<T>(byte_val) << bits_extracted);
-
-        bits_extracted += bits_to_take;
-        current_bit_offset += bits_to_take;
+        return result;
     }
-
-    return result;
 }
 
 /**
