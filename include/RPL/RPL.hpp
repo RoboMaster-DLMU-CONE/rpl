@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <concepts>
@@ -1729,6 +1730,8 @@ inline void compiler_barrier() noexcept {
 // namespace RPL
 #endif
 } // namespace RPL
+#ifdef RPL_USE_STD_ATOMIC
+#endif
 
 namespace RPL {
 /**
@@ -1752,7 +1755,12 @@ concept Deserializable = (std::is_same_v<T, Ts> || ...);
 template <typename... Ts> class Deserializer {
   using Collector = Meta::PacketInfoCollector<Ts...>; ///< 用于收集包信息的类型
   Containers::MemoryPool<Collector> pool{}; ///< 存储反序列化数据的内存池
+
+#ifdef RPL_USE_STD_ATOMIC
+  std::atomic<uint32_t> versions_[sizeof...(Ts)]{}; ///< SeqLock version counters
+#else
   volatile uint32_t versions_[sizeof...(Ts)]{}; ///< SeqLock version counters
+#endif
 
 public:
   /**
@@ -1770,12 +1778,22 @@ public:
       return;
     const auto seq_idx = Collector::cmd_seq_index(cmd);
 
+#ifdef RPL_USE_STD_ATOMIC
+    versions_[seq_idx].fetch_add(1, std::memory_order_release);
+#else
     versions_[seq_idx] = versions_[seq_idx] + 1;
     compiler_barrier();
+#endif
+
     std::memcpy(reinterpret_cast<uint8_t *>(&pool.buffer[byte_offset]), src,
                 len);
+
+#ifdef RPL_USE_STD_ATOMIC
+    versions_[seq_idx].fetch_add(1, std::memory_order_release);
+#else
     compiler_barrier();
     versions_[seq_idx] = versions_[seq_idx] + 1;
+#endif
   }
 
   /**
@@ -1794,8 +1812,12 @@ public:
       return;
     const auto seq_idx = Collector::cmd_seq_index(cmd);
 
+#ifdef RPL_USE_STD_ATOMIC
+    versions_[seq_idx].fetch_add(1, std::memory_order_release);
+#else
     versions_[seq_idx] = versions_[seq_idx] + 1;
     compiler_barrier();
+#endif
 
     uint8_t *dest = reinterpret_cast<uint8_t *>(&pool.buffer[byte_offset]);
     if (!s1.empty()) {
@@ -1805,8 +1827,12 @@ public:
       std::memcpy(dest + s1.size(), s2.data(), s2.size());
     }
 
+#ifdef RPL_USE_STD_ATOMIC
+    versions_[seq_idx].fetch_add(1, std::memory_order_release);
+#else
     compiler_barrier();
     versions_[seq_idx] = versions_[seq_idx] + 1;
+#endif
   }
 
   /**
@@ -1825,8 +1851,13 @@ public:
     T result;
     uint32_t v1, v2;
     do {
+#ifdef RPL_USE_STD_ATOMIC
+      v1 = versions_[seq_idx].load(std::memory_order_acquire);
+#else
       v1 = versions_[seq_idx];
       compiler_barrier();
+#endif
+
       auto ptr = reinterpret_cast<uint8_t *>(
           &pool.buffer[Collector::template type_index<T>()]);
       Meta::PacketTraits<T>::before_get(ptr);
@@ -1836,8 +1867,14 @@ public:
       } else {
         result = *reinterpret_cast<const T *>(ptr);
       }
+
+#ifdef RPL_USE_STD_ATOMIC
+      std::atomic_thread_fence(std::memory_order_acquire);
+      v2 = versions_[seq_idx].load(std::memory_order_relaxed);
+#else
       compiler_barrier();
       v2 = versions_[seq_idx];
+#endif
     } while (v1 != v2 || (v1 & 1));
     return result;
   };

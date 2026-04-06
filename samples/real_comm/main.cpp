@@ -37,7 +37,7 @@ static constexpr auto DEVICE_PATH = "/dev/ttyUSB0";
 
 int main() {
   RPL::Deserializer<CustomControllerData, VT03RemotePacket> deserializer;
-  RPL::Parser parser{deserializer};
+  RPL::Parser<CustomControllerData, VT03RemotePacket> parser{deserializer};
   RPL::Serializer<SampleB> serializer;
 
   HySerial::Builder builder;
