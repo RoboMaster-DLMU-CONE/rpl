@@ -48,6 +48,15 @@ target_compile_definitions(rpl INTERFACE
         FRAME_HEADER_TAG=${FRAME_HEADER_TAG}
 )
 
+find_package(Python3 QUIET)
+if (Python3_FOUND)
+    add_custom_target(rpl_amalgamate
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/amalgamate.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        COMMENT "Generating amalgamated RPL.hpp header"
+    )
+endif ()
+
 if (NOT ZEPHYR_TOOLCHAIN_VARIANT)
   # Install RPL library headers
   install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/RPL
