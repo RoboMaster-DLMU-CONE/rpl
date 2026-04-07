@@ -115,22 +115,55 @@ namespace RPL {
  *
  * @tparam T 目标结构类型
  * @param buffer 包含线格式数据的字节序列
- * @return 正确初始化位域的结构
- */
-template <typename T>
-requires Meta::HasBitLayout<Meta::PacketTraits<T>>
-constexpr T deserialize_bitstream(std::span<const uint8_t> buffer) {
-    using Layout = typename Meta::PacketTraits<T>::BitLayout;
-    constexpr std::size_t N = std::tuple_size_v<Layout>;
+ namespace Detail {
 
-    // 1. 根据编译期布局将值提取到元组中
-    auto values_tuple = Detail::parse_bitstream_impl<Layout>(
-        buffer, std::make_index_sequence<N>{}
-    );
+ /**
+  * @brief 辅助函数：将单个元素包装成 tuple，如果是 std::array 则展开
+  */
+ template <typename T>
+ constexpr auto flatten_element(T&& val) {
+     return std::make_tuple(std::forward<T>(val));
+ }
 
-    // 2. 使用 C++20 聚合初始化完美赋值给原生位域
-    return std::make_from_tuple<T>(values_tuple);
-}
+ template <typename T, std::size_t N>
+ constexpr auto flatten_element(const std::array<T, N>& arr) {
+     return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+         return std::make_tuple(arr[Is]...);
+     }(std::make_index_sequence<N>{});
+ }
+
+ /**
+  * @brief 将包含 std::array 的 tuple 打平为全标量 tuple
+  * 
+  * 这样可以利用 C++20 的大括号省略特性初始化含有 C 数组的结构体
+  */
+ template <typename... Ts>
+ constexpr auto flatten_tuple(const std::tuple<Ts...>& t) {
+     return std::apply([](const auto&... args) {
+         return std::tuple_cat(flatten_element(args)...);
+     }, t);
+ }
+
+ /**
+  * @brief 在特定位偏移处从字节序列中提取指定位数
+ ...
+ template <typename T>
+ requires Meta::HasBitLayout<Meta::PacketTraits<T>>
+ constexpr T deserialize_bitstream(std::span<const uint8_t> buffer) {
+     using Layout = typename Meta::PacketTraits<T>::BitLayout;
+     constexpr std::size_t N = std::tuple_size_v<Layout>;
+
+     // 1. 根据编译期布局将值提取到元组中 (可能包含 std::array)
+     auto values_tuple = Detail::parse_bitstream_impl<Layout>(
+         buffer, std::make_index_sequence<N>{}
+     );
+
+     // 2. 打平元组以支持 C 风格数组的聚合初始化
+     auto flat_tuple = Detail::flatten_tuple(values_tuple);
+
+     // 3. 使用 C++20 聚合初始化赋值
+     return std::make_from_tuple<T>(flat_tuple);
+ }
 
 } // namespace RPL
 
