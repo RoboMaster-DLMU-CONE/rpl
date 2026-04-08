@@ -1,6 +1,6 @@
 #include <HySerial/HySerial.hpp>
 #include <RPL/Deserializer.hpp>
-#include <RPL/Packets/RoboMaster/CustomControllerData.h>
+#include <RPL/Packets/RoboMaster/CustomControllerData.hpp>
 #include <RPL/Packets/Sample/SampleA.hpp>
 #include <RPL/Packets/Sample/SampleB.hpp>
 #include <RPL/Packets/VT03RemotePacket.hpp>

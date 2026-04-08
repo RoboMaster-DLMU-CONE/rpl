@@ -1,4 +1,4 @@
-#include <RPL/Packets/RoboMaster/CustomControllerData.h>
+#include <RPL/Packets/RoboMaster/CustomControllerData.hpp>
 #include <RPL/Packets/VT03RemotePacket.hpp>
 #include <RPL/Serializer.hpp>
 #include <cassert>
@@ -16,7 +16,7 @@ void test_mixed_protocol_serialization() {
     
     // Prepare packets
     CustomControllerData rm_packet;
-    std::memset(rm_packet.data, 0xAB, sizeof(rm_packet.data)); // Fill with dummy data
+    std::memset(rm_packet.data.data(), 0xAB, sizeof(rm_packet.data)); // Fill with dummy data
 
     VT03RemotePacket vt_packet{};
     vt_packet.right_stick_x = 1024;
