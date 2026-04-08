@@ -5,6 +5,36 @@
  * 实现一个双区环形缓冲区 (BipBuffer)，保证连续内存访问。
  * 它维护两个区域 (A 和 B)，通过在缓冲区起始处开启新区域来处理
  * 回绕 (wrap-around) 情况，避免数据分裂。
+ *
+ * BipBuffer 是一种特殊的环形缓冲区，它保证任何可读数据块在物理内存中
+ * 是连续的。这使得解析器可以直接读取数据而无需处理回绕情况。
+ *
+ * @par 设计原理
+ * - 区域 A: FIFO 的头部（最先读取的数据）
+ * - 区域 B: FIFO 的尾部（在 A 之后读取的数据），起始位置始终为 0
+ * - 写入时自动选择合适区域，避免数据跨越缓冲区边界
+ *
+ * @par 使用场景
+ * - 流式数据包解析（如 Parser 类）
+ * - DMA 直接内存访问的零拷贝写入
+ * - 需要连续内存块的协议解析
+ *
+ * @code
+ * RPL::Containers::BipBuffer<1024> buffer;
+ *
+ * // 获取写入缓冲区
+ * auto write_span = buffer.get_write_buffer();
+ * // DMA 或手动写入数据...
+ * buffer.advance_write_index(received_bytes);
+ *
+ * // 读取数据
+ * auto read_span = buffer.get_contiguous_read_buffer();
+ * // 处理数据...
+ * buffer.discard(processed_bytes);
+ * @endcode
+ *
+ * @author WindWeaver
+ * @date 2024
  */
 
 #ifndef RPL_BIPBUFFER_HPP
@@ -45,6 +75,9 @@ public:
    *
    * 返回可用于写入的最大连续块。
    * 如果尾部空间不足，这可能会切换到缓冲区起始处。
+   *
+   * @return 可写入的连续内存 span，如果缓冲区已满则返回空 span
+   * @note 此方法支持零拷贝 DMA 写入
    */
   std::span<uint8_t> get_write_buffer() noexcept {
     // 情况 1: 区域 B 中有数据。只能追加到 B。
@@ -83,8 +116,13 @@ public:
   /**
    * @brief 预留空间/提交写入
    *
+   * 在数据写入缓冲区后调用此方法，以提交已写入的字节数。
+   * 此方法会根据当前写入区域（A 或 B）更新相应的状态。
+   *
    * @param length 已写入的字节数
-   * @return true 如果成功
+   * @return true 如果成功提交
+   * @return false 如果提交长度超出可用空间
+   * @note 此方法应与 get_write_buffer() 或 get_write_buffer_force_wrap() 配合使用
    */
   bool advance_write_index(size_t length) {
     if (length == 0)
@@ -133,7 +171,9 @@ public:
    *
    * 强制缓冲区跳过尾部剩余空间，从 0 位置开始写入。
    * 当尾部剩余空间太小无法容纳 incoming 数据包时很有用。
-   * @return 缓冲区起始处的 Span (区域 B)
+   *
+   * @return 缓冲区起始处的 Span (区域 B)，如果无法切换则返回空 span
+   * @note 此方法用于处理特殊情况，通常应使用 get_write_buffer()
    */
   std::span<uint8_t> get_write_buffer_force_wrap() {
     if (region_b_size > 0) {
@@ -163,6 +203,15 @@ public:
 
   /**
    * @brief 复制数据到缓冲区
+   *
+   * 将数据拷贝到内部缓冲区，自动选择合适的写入区域。
+   * 如果当前区域空间不足，会尝试切换到另一区域。
+   *
+   * @param data 指向源数据的指针
+   * @param length 要写入的字节数
+   * @return true 如果成功写入
+   * @return false 如果没有足够的连续空间
+   * @note 此方法会执行内存拷贝，对于零拷贝场景请使用 get_write_buffer()
    */
   bool write(const uint8_t *data, size_t length) {
     if (length == 0)
@@ -193,6 +242,11 @@ public:
 
   /**
    * @brief 获取连续数据用于读取
+   *
+   * 返回当前可用的第一个连续数据块（区域 A 的内容）。
+   * 读取并处理完数据后，应调用 discard() 来释放空间。
+   *
+   * @return 可读的连续内存 span，如果没有数据则返回空 span
    */
   [[nodiscard]] std::span<const uint8_t>
   get_contiguous_read_buffer() const noexcept {
@@ -204,7 +258,13 @@ public:
 
   /**
    * @brief 丢弃数据 (推进读取索引)
-   * 支持跨区域丢弃
+   *
+   * 从缓冲区中移除已处理的数据，释放空间供后续写入使用。
+   * 支持跨区域丢弃（同时丢弃区域 A 和 B 的数据）。
+   *
+   * @param length 要丢弃的字节数
+   * @return true 如果成功丢弃
+   * @return false 如果请求长度超过可用数据量
    */
   bool discard(size_t length) {
     if (length == 0)
@@ -245,9 +305,14 @@ public:
   /**
    * @brief 获取两个连续的读视图 (用于零拷贝分段处理)
    *
-   * @param offset 相对于 available 数据的偏移量
-   * @param length 长度
+   * 返回指定偏移量和长度的数据视图，可能分为两个连续的 span。
+   * 如果数据是连续的，第二个 span 为空。
+   *
+   * @param offset 相对于可用数据的偏移量
+   * @param length 要读取的长度
    * @return std::pair 包含两个 span。如果数据是连续的，第二个 span 为空。
+   *         如果请求超出范围，两个 span 都为空。
+   * @note 此方法用于零拷贝 CRC 校验等场景
    */
   [[nodiscard]] std::pair<std::span<const uint8_t>, std::span<const uint8_t>>
   get_read_spans(size_t offset, size_t length) const noexcept {
@@ -270,11 +335,22 @@ public:
     }
   }
 
-  // 便捷方法
+  // --- 便捷方法 ---
+  
+  /**
+   * @brief 获取可用数据字节数
+   * @return 当前缓冲区中可读数据的总字节数
+   */
   size_t available() const { return region_a_size + region_b_size; }
 
-  // 空间计算很棘手:
-  // 它是 max(A 尾部空间, A 起始前空间) - 但逻辑取决于状态。大约:
+  /**
+   * @brief 获取可用写入空间
+   *
+   * 注意：这是总空闲字节数，不一定是连续的。
+   * 实际可写入的连续空间可能小于此值。
+   *
+   * @return 总空闲字节数
+   */
   size_t space() const {
     if (region_b_size > 0)
       return region_a_start - region_b_size;
@@ -283,18 +359,44 @@ public:
     return (SIZE - (region_a_start + region_a_size)) + region_a_start;
   }
 
+  /**
+   * @brief 检查缓冲区是否已满
+   * @return true 如果没有可用写入空间
+   */
   bool full() const { return space() == 0; }
+  
+  /**
+   * @brief 检查缓冲区是否为空
+   * @return true 如果没有可读数据
+   */
   bool empty() const { return available() == 0; }
+  
+  /**
+   * @brief 清空缓冲区
+   * 重置所有状态，丢弃所有数据
+   */
   void clear() {
     region_a_start = region_a_size = 0;
     region_b_size = 0;
   }
 
+  /**
+   * @brief 获取缓冲区总容量
+   * @return 缓冲区的总大小（编译期常量）
+   */
   static constexpr size_t size() { return SIZE; }
 
   /**
-   * @brief 窥视 (必要时复制，但 BipBuffer 逻辑尽量避免)
-   * 注意: BipBuffer 的读取结构使得跨边界 'peek' 不复制很棘手。
+   * @brief 窥视缓冲区数据（不丢弃）
+   *
+   * 将数据从缓冲区复制到外部缓冲区，但不修改读取索引。
+   * 如果需要读取并丢弃数据，应使用 read() 方法。
+   *
+   * @param data 目标缓冲区指针
+   * @param offset 相对于可用数据的偏移量
+   * @param length 要读取的字节数
+   * @return true 如果成功读取
+   * @return false 如果请求超出可用范围
    */
   bool peek(uint8_t *data, size_t offset, size_t length) const {
     if (offset + length > available())
@@ -317,6 +419,17 @@ public:
     return true;
   }
 
+  /**
+   * @brief 读取并丢弃数据
+   *
+   * 将数据从缓冲区复制到外部缓冲区，并丢弃已读取的数据。
+   * 相当于 peek() 后调用 discard()。
+   *
+   * @param data 目标缓冲区指针
+   * @param length 要读取的字节数
+   * @return true 如果成功读取并丢弃
+   * @return false 如果请求超出可用范围
+   */
   bool read(uint8_t *data, size_t length) {
     if (!peek(data, 0, length))
       return false;

@@ -2,6 +2,7 @@
 #define RPL_INTERACTIONSTRING_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -9,8 +10,8 @@
  */
 struct InteractionString
 {
-    uint8_t[15] graphic_data; ///< 图形配置数据 (同 InteractionFigure 结构)
-    uint8_t[30] data; ///< 字符串内容
+    std::array<uint8_t, 15> graphic_data; ///< 图形配置数据 (同 InteractionFigure 结构)
+    std::array<uint8_t, 30> data; ///< 字符串内容
 } __attribute__((packed));
 
 template <>

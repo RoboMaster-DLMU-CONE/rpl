@@ -20,7 +20,7 @@ void test_mixed_protocol_parsing() {
     
     // Create test packets
     CustomControllerData rm_packet;
-    std::memset(rm_packet.data, 0x11, sizeof(rm_packet.data));
+    std::memset(rm_packet.data.data(), 0x11, sizeof(rm_packet.data));
 
     VT03RemotePacket vt_packet{};
     vt_packet.right_stick_x = 1024;
@@ -64,7 +64,7 @@ void test_corrupted_mixed_stream() {
     std::vector<uint8_t> buffer(200);
 
     CustomControllerData rm_packet;
-    std::memset(rm_packet.data, 0x22, sizeof(rm_packet.data));
+    std::memset(rm_packet.data.data(), 0x22, sizeof(rm_packet.data));
 
     VT03RemotePacket vt_packet{};
     vt_packet.right_stick_x = 512;

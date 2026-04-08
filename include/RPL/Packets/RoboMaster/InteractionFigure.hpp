@@ -2,6 +2,9 @@
 #define RPL_INTERACTIONFIGURE_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -9,7 +12,7 @@
  */
 struct InteractionFigure
 {
-    uint8_t[3] figure_name; ///< 图形索引名
+    std::array<uint8_t, 3> figure_name; ///< 图形索引名
     uint32_t operate_type : 3; ///< 0-空, 1-增加, 2-修改, 3-删除
     uint32_t figure_type : 3; ///< 0-直线, 1-矩形, 2-正圆, 3-椭圆, 4-圆弧, 5-浮点, 6-整型, 7-字符
     uint32_t layer : 4; ///< 图层 (0-9)
@@ -28,6 +31,21 @@ template <>
 struct RPL::Meta::PacketTraits<InteractionFigure> : PacketTraitsBase<PacketTraits<InteractionFigure>>
 {
     static constexpr uint16_t cmd = 0x0101;
-    static constexpr size_t size = sizeof(InteractionFigure);
+    static constexpr size_t size = 15;
+    using BitLayout = std::tuple<
+        Field<std::array<uint8_t, 3>, 24>,
+        Field<uint32_t, 3>,
+        Field<uint32_t, 3>,
+        Field<uint32_t, 4>,
+        Field<uint32_t, 4>,
+        Field<uint32_t, 9>,
+        Field<uint32_t, 9>,
+        Field<uint32_t, 10>,
+        Field<uint32_t, 11>,
+        Field<uint32_t, 11>,
+        Field<uint32_t, 10>,
+        Field<uint32_t, 11>,
+        Field<uint32_t, 11>
+    >;
 };
 #endif // RPL_INTERACTIONFIGURE_HPP

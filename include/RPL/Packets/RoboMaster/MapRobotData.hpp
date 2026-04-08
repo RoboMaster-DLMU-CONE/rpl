@@ -2,6 +2,7 @@
 #define RPL_MAPROBOTDATA_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**

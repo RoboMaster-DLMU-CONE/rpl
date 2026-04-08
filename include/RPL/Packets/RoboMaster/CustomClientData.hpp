@@ -2,6 +2,9 @@
 #define RPL_CUSTOMCLIENTDATA_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -21,6 +24,14 @@ template <>
 struct RPL::Meta::PacketTraits<CustomClientData> : PacketTraitsBase<PacketTraits<CustomClientData>>
 {
     static constexpr uint16_t cmd = 0x0306;
-    static constexpr size_t size = sizeof(CustomClientData);
+    static constexpr size_t size = 8;
+    using BitLayout = std::tuple<
+        Field<uint16_t, 16>,
+        Field<uint16_t, 12>,
+        Field<uint16_t, 4>,
+        Field<uint16_t, 12>,
+        Field<uint16_t, 4>,
+        Field<uint16_t, 16>
+    >;
 };
 #endif // RPL_CUSTOMCLIENTDATA_HPP

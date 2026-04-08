@@ -2,6 +2,7 @@
 #define RPL_MAPDATA_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -12,8 +13,8 @@ struct MapData
     uint8_t intention; ///< 意图：1-攻击, 2-防守, 3-移动
     uint16_t start_position_x; ///< 路径起点 X (dm)
     uint16_t start_position_y; ///< 路径起点 Y (dm)
-    int8_t[49] delta_x; ///< 路径点 X 轴增量数组 (dm)
-    int8_t[49] delta_y; ///< 路径点 Y 轴增量数组 (dm)
+    std::array<int8_t, 49> delta_x; ///< 路径点 X 轴增量数组 (dm)
+    std::array<int8_t, 49> delta_y; ///< 路径点 Y 轴增量数组 (dm)
     uint16_t sender_id; ///< 发送者 ID
 } __attribute__((packed));
 

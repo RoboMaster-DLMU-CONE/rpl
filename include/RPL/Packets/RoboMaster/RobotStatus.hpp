@@ -2,6 +2,9 @@
 #define RPL_ROBOTSTATUS_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -26,6 +29,19 @@ template <>
 struct RPL::Meta::PacketTraits<RobotStatus> : PacketTraitsBase<PacketTraits<RobotStatus>>
 {
     static constexpr uint16_t cmd = 0x0201;
-    static constexpr size_t size = sizeof(RobotStatus);
+    static constexpr size_t size = 13;
+    using BitLayout = std::tuple<
+        Field<uint8_t, 8>,
+        Field<uint8_t, 8>,
+        Field<uint16_t, 16>,
+        Field<uint16_t, 16>,
+        Field<uint16_t, 16>,
+        Field<uint16_t, 16>,
+        Field<uint16_t, 16>,
+        Field<uint8_t, 1>,
+        Field<uint8_t, 1>,
+        Field<uint8_t, 1>,
+        Field<uint8_t, 5>
+    >;
 };
 #endif // RPL_ROBOTSTATUS_HPP

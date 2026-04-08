@@ -50,4 +50,41 @@ struct RPL::Meta::PacketTraits<XLargePacket>
   static constexpr size_t size = sizeof(XLargePacket);
 };
 
+// --- Bitfield Packets ---
+
+struct RobotStatus {
+  uint8_t is_online : 1;
+  uint8_t work_mode : 3;
+  uint8_t error_code : 4;
+  uint16_t voltage;
+};
+
+namespace RPL::Meta {
+template <>
+struct PacketTraits<RobotStatus> : PacketTraitsBase<PacketTraits<RobotStatus>> {
+  static constexpr uint16_t cmd = 0x1001;
+  static constexpr size_t size = 3;
+  using BitLayout =
+      std::tuple<Field<uint8_t, 1>, Field<uint8_t, 3>, Field<uint8_t, 4>,
+                 Field<uint16_t, 16>>;
+};
+} // namespace RPL::Meta
+
+struct CrossByteTest {
+  uint32_t val1 : 12;
+  uint32_t val2 : 12;
+  uint8_t val3 : 8;
+};
+
+namespace RPL::Meta {
+template <>
+struct PacketTraits<CrossByteTest>
+    : PacketTraitsBase<PacketTraits<CrossByteTest>> {
+  static constexpr uint16_t cmd = 0x1002;
+  static constexpr size_t size = 4;
+  using BitLayout =
+      std::tuple<Field<uint32_t, 12>, Field<uint32_t, 12>, Field<uint8_t, 8>>;
+};
+} // namespace RPL::Meta
+
 #endif // RPL_BENCHMARK_PACKETS_HPP

@@ -2,6 +2,9 @@
 #define RPL_SENTRYINFO_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -26,6 +29,19 @@ template <>
 struct RPL::Meta::PacketTraits<SentryInfo> : PacketTraitsBase<PacketTraits<SentryInfo>>
 {
     static constexpr uint16_t cmd = 0x020D;
-    static constexpr size_t size = sizeof(SentryInfo);
+    static constexpr size_t size = 6;
+    using BitLayout = std::tuple<
+        Field<uint32_t, 11>,
+        Field<uint32_t, 4>,
+        Field<uint32_t, 4>,
+        Field<uint32_t, 1>,
+        Field<uint32_t, 1>,
+        Field<uint32_t, 10>,
+        Field<uint32_t, 1>,
+        Field<uint16_t, 12>,
+        Field<uint16_t, 2>,
+        Field<uint16_t, 1>,
+        Field<uint16_t, 1>
+    >;
 };
 #endif // RPL_SENTRYINFO_HPP

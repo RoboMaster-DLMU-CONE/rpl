@@ -2,6 +2,9 @@
 #define RPL_EVENTDATA_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -26,6 +29,19 @@ template <>
 struct RPL::Meta::PacketTraits<EventData> : PacketTraitsBase<PacketTraits<EventData>>
 {
     static constexpr uint16_t cmd = 0x0101;
-    static constexpr size_t size = sizeof(EventData);
+    static constexpr size_t size = 4;
+    using BitLayout = std::tuple<
+        Field<uint32_t, 3>,
+        Field<uint32_t, 4>,
+        Field<uint32_t, 2>,
+        Field<uint32_t, 2>,
+        Field<uint32_t, 9>,
+        Field<uint32_t, 3>,
+        Field<uint32_t, 2>,
+        Field<uint32_t, 2>,
+        Field<uint32_t, 2>,
+        Field<uint32_t, 1>,
+        Field<uint32_t, 2>
+    >;
 };
 #endif // RPL_EVENTDATA_HPP

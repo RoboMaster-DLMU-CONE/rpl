@@ -2,6 +2,9 @@
 #define RPL_SENTRYDECISION_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -23,6 +26,16 @@ template <>
 struct RPL::Meta::PacketTraits<SentryDecision> : PacketTraitsBase<PacketTraits<SentryDecision>>
 {
     static constexpr uint16_t cmd = 0x0120;
-    static constexpr size_t size = sizeof(SentryDecision);
+    static constexpr size_t size = 4;
+    using BitLayout = std::tuple<
+        Field<uint32_t, 1>,
+        Field<uint32_t, 1>,
+        Field<uint32_t, 11>,
+        Field<uint32_t, 4>,
+        Field<uint32_t, 4>,
+        Field<uint32_t, 2>,
+        Field<uint32_t, 1>,
+        Field<uint32_t, 8>
+    >;
 };
 #endif // RPL_SENTRYDECISION_HPP

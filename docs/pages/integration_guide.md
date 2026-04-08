@@ -21,7 +21,26 @@ FetchContent_MakeAvailable(rpl)
 target_link_libraries(your_target PRIVATE rpl::rpl)
 ```
 
-### 方法 B: 子模块 (Submodule)
+### 方法 B: 单文件头 (Single Header)
+
+RPL 提供了一个自动生成的单文件头 `RPL.hpp`，包含了所有核心功能。这是最简单的集成方式，特别适合不使用 CMake 的项目（如 Keil、IAR、Makefile 等）。
+
+1. 从仓库中复制 `include/RPL/RPL.hpp` 到你的项目。
+2. 直接包含该头文件即可使用：
+
+```cpp
+#include "RPL.hpp"
+#include "MyPackets.hpp"
+
+// 与标准用法完全一致
+RPL::Deserializer<PacketA, PacketB> deserializer;
+RPL::Parser<PacketA, PacketB> parser(deserializer);
+```
+
+> **优势**：无需配置包含路径，一个文件即可使用所有 RPL 功能。
+> **注意**：单文件头体积较大（约 200KB），开发调试阶段建议使用多文件头版本 (`include/RPL/`)。
+
+### 方法 C: 子模块 (Submodule)
 
 ```bash
 git submodule add https://github.com/RoboMaster-DLMU-CONE/rpl.git libs/rpl
@@ -102,7 +121,7 @@ void read_thread() {
     }
 }
 
-你也可以使用我们开发的[HySerial]("https://github.com/RoboMaster-DLMU-CONE/HySerial")或者[HyCAN]("https://github.com/RoboMaster-DLMU-CONE/HyCAN")。请参考`samples`文件夹下的`real_comm`示例。
+你也可以使用我们开发的[HySerial]("https://github.com/RoboMaster-DLMU-CONE/HySerial")。请参考`samples`文件夹下的`real_comm`示例。
 ```
 
 ## 4. Zephyr RTOS 集成

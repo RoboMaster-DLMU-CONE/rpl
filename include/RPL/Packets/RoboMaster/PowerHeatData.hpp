@@ -2,6 +2,7 @@
 #define RPL_POWERHEATDATA_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**

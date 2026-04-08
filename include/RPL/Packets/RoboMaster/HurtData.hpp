@@ -2,6 +2,9 @@
 #define RPL_HURTDATA_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -17,6 +20,10 @@ template <>
 struct RPL::Meta::PacketTraits<HurtData> : PacketTraitsBase<PacketTraits<HurtData>>
 {
     static constexpr uint16_t cmd = 0x0206;
-    static constexpr size_t size = sizeof(HurtData);
+    static constexpr size_t size = 1;
+    using BitLayout = std::tuple<
+        Field<uint8_t, 4>,
+        Field<uint8_t, 4>
+    >;
 };
 #endif // RPL_HURTDATA_HPP

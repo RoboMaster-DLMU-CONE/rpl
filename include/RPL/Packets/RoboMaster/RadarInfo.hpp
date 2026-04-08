@@ -2,6 +2,9 @@
 #define RPL_RADARINFO_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -20,6 +23,13 @@ template <>
 struct RPL::Meta::PacketTraits<RadarInfo> : PacketTraitsBase<PacketTraits<RadarInfo>>
 {
     static constexpr uint16_t cmd = 0x020E;
-    static constexpr size_t size = sizeof(RadarInfo);
+    static constexpr size_t size = 1;
+    using BitLayout = std::tuple<
+        Field<uint8_t, 2>,
+        Field<uint8_t, 1>,
+        Field<uint8_t, 2>,
+        Field<uint8_t, 1>,
+        Field<uint8_t, 2>
+    >;
 };
 #endif // RPL_RADARINFO_HPP

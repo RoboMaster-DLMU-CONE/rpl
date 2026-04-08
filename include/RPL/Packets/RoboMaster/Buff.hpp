@@ -2,6 +2,7 @@
 #define RPL_BUFF_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**

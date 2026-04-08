@@ -1,0 +1,51 @@
+name: Amalgamate Single Header
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'include/**'
+      - 'scripts/amalgamate.py'
+  workflow_dispatch:
+
+jobs:
+  amalgamate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Run Amalgamation
+        run: python3 scripts/amalgamate.py
+
+      - name: Validate Generated Header
+        run: |
+          mkdir build && cd build
+          cmake -DBUILD_RPL_TESTS=ON ..
+          make test_amalgamation -j$(nproc)
+          ./tests/test_amalgamation
+
+      - name: Check for Changes
+        id: git-check
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add include/RPL/RPL.hpp
+          if git diff --staged --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and Push
+        if: steps.git-check.outputs.changed == 'true'
+        run: |
+          git commit -m "Auto-generate RPL.hpp single header"
+          git push origin HEAD:main

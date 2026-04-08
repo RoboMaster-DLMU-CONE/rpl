@@ -2,6 +2,7 @@
 #define RPL_ROBOTINTERACTIONDATA_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -12,7 +13,7 @@ struct RobotInteractionData
     uint16_t data_cmd_id; ///< 子内容 ID (0x0200-0x02FF 等)
     uint16_t sender_id; ///< 发送者 ID
     uint16_t receiver_id; ///< 接收者 ID
-    uint8_t[112] user_data; ///< 内容数据段 (最大 112 字节)
+    std::array<uint8_t, 112> user_data; ///< 内容数据段 (最大 112 字节)
 } __attribute__((packed));
 
 template <>

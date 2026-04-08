@@ -2,6 +2,9 @@
 #define RPL_GAMESTATUS_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -19,6 +22,12 @@ template <>
 struct RPL::Meta::PacketTraits<GameStatus> : PacketTraitsBase<PacketTraits<GameStatus>>
 {
     static constexpr uint16_t cmd = 0x0001;
-    static constexpr size_t size = sizeof(GameStatus);
+    static constexpr size_t size = 11;
+    using BitLayout = std::tuple<
+        Field<uint8_t, 4>,
+        Field<uint8_t, 4>,
+        Field<uint16_t, 16>,
+        Field<uint64_t, 64>
+    >;
 };
 #endif // RPL_GAMESTATUS_HPP

@@ -2,6 +2,7 @@
 #define RPL_CUSTOMINFO_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -11,7 +12,7 @@ struct CustomInfo
 {
     uint16_t sender_id; ///< 发送者 ID
     uint16_t receiver_id; ///< 接收者 ID
-    uint8_t[30] user_data; ///< 自定义数据 (UTF-16 编码)
+    std::array<uint8_t, 30> user_data; ///< 自定义数据 (UTF-16 编码)
 } __attribute__((packed));
 
 template <>

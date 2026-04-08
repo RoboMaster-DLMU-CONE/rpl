@@ -2,6 +2,9 @@
 #define RPL_RFIDSTATUS_HPP
 
 #include <cstdint>
+#include <array>
+#include <tuple>
+#include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -18,6 +21,11 @@ template <>
 struct RPL::Meta::PacketTraits<RFIDStatus> : PacketTraitsBase<PacketTraits<RFIDStatus>>
 {
     static constexpr uint16_t cmd = 0x0209;
-    static constexpr size_t size = sizeof(RFIDStatus);
+    static constexpr size_t size = 5;
+    using BitLayout = std::tuple<
+        Field<uint32_t, 32>,
+        Field<uint8_t, 2>,
+        Field<uint8_t, 6>
+    >;
 };
 #endif // RPL_RFIDSTATUS_HPP

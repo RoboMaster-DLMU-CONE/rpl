@@ -2,6 +2,7 @@
 #define RPL_CUSTOMCONTROLLERDATA_HPP
 
 #include <cstdint>
+#include <array>
 #include <RPL/Meta/PacketTraits.hpp>
 
 /**
@@ -9,7 +10,7 @@
  */
 struct CustomControllerData
 {
-    uint8_t data[30]; ///< 自定义数据内容
+    std::array<uint8_t, 30> data; ///< 自定义数据内容
 } __attribute__((packed));
 
 template <>
