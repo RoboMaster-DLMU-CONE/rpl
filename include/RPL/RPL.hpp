@@ -262,6 +262,16 @@ namespace RPL::Containers
 namespace RPL::Meta {
 
 /**
+ * @brief 检查类型是否为 std::array
+ */
+template <typename T>
+struct is_std_array : std::false_type {};
+template <typename T, std::size_t N>
+struct is_std_array<std::array<T, N>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_std_array_v = is_std_array<T>::value;
+
+/**
  * @brief 位流解析的字段描述器
  *
  * 用于 PacketTraits::BitLayout 中定义位域的线格式
@@ -271,8 +281,9 @@ namespace RPL::Meta {
  */
 template <typename T, std::size_t Bits = sizeof(T) * 8>
 struct Field {
-    static_assert(std::is_integral_v<T>, "Field type must be an integral type");
-    static_assert(Bits > 0 && Bits <= sizeof(T) * 8, "Bits must fit within the specified type T");
+    // We allow integral types or std::array
+    // static_assert(std::is_integral_v<T>, "Field type must be an integral type"); 
+    static_assert(Bits > 0, "Bits must be positive");
 
     using type = T;
     static constexpr std::size_t bits = Bits;
@@ -414,44 +425,57 @@ namespace RPL::Detail {
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr T extract_bits(std::span<const uint8_t> buffer) {
-    static_assert(BitWidth <= sizeof(T) * 8, "BitWidth exceeds return type capacity");
+    if constexpr (Meta::is_std_array_v<T>) {
+        T result{};
+        using ElementType = typename T::value_type;
+        constexpr std::size_t N = std::tuple_size_v<T>;
+        constexpr std::size_t bits_per_element = BitWidth / N;
+        static_assert(bits_per_element * N == BitWidth, "BitWidth must be a multiple of array size");
+        
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ((result[Is] = extract_bits<ElementType, BitOffset + Is * bits_per_element, bits_per_element>(buffer)), ...);
+        }(std::make_index_sequence<N>{});
+        return result;
+    } else {
+        static_assert(BitWidth <= sizeof(T) * 8, "BitWidth exceeds return type capacity");
 
-    T result = 0;
-    std::size_t current_bit_offset = BitOffset;
-    std::size_t bits_extracted = 0;
+        T result = 0;
+        std::size_t current_bit_offset = BitOffset;
+        std::size_t bits_extracted = 0;
 
-    // 逐字节处理
-    while (bits_extracted < BitWidth) {
-        std::size_t byte_index = current_bit_offset / 8;
-        std::size_t bit_in_byte = current_bit_offset % 8;
+        // 逐字节处理
+        while (bits_extracted < BitWidth) {
+            std::size_t byte_index = current_bit_offset / 8;
+            std::size_t bit_in_byte = current_bit_offset % 8;
 
-        // 我们能从当前字节取多少位?
-        // 要么是我们还需要的剩余位，要么是该字节剩余的位
-        std::size_t bits_to_take = std::min(BitWidth - bits_extracted, 8 - bit_in_byte);
+            // 我们能从当前字节取多少位?
+            // 要么是我们还需要的剩余位，要么是该字节剩余的位
+            std::size_t bits_to_take = std::min(BitWidth - bits_extracted, static_cast<std::size_t>(8 - bit_in_byte));
 
-        // 安全检查以避免越界，尽管通常缓冲区应该足够大
-        if (byte_index >= buffer.size()) {
-            break;
+            // 安全检查以避免越界，尽管通常缓冲区应该足够大
+            if (byte_index >= buffer.size()) {
+                break;
+            }
+
+            uint8_t byte_val = buffer[byte_index];
+
+            // 下移以将目标位移到位置 0
+            byte_val >>= bit_in_byte;
+
+            // 屏蔽不需要的上位
+            uint8_t mask = (1ULL << bits_to_take) - 1;
+            byte_val &= mask;
+
+            // 将这些提取的位放入结果中的正确位置
+            // 由于我们从线格式的 LSB 开始提取 (假设小端位打包)
+            result |= (static_cast<T>(byte_val) << bits_extracted);
+
+            bits_extracted += bits_to_take;
+            current_bit_offset += bits_to_take;
         }
 
-        uint8_t byte_val = buffer[byte_index];
-
-        // 下移以将目标位移到位置 0
-        byte_val >>= bit_in_byte;
-
-        // 屏蔽不需要的上位
-        uint8_t mask = (1ULL << bits_to_take) - 1;
-        byte_val &= mask;
-
-        // 将这些提取的位放入结果中的正确位置
-        // 由于我们从线格式的 LSB 开始提取 (假设小端位打包)
-        result |= (static_cast<T>(byte_val) << bits_extracted);
-
-        bits_extracted += bits_to_take;
-        current_bit_offset += bits_to_take;
+        return result;
     }
-
-    return result;
 }
 
 /**
@@ -477,6 +501,33 @@ constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_
     );
 }
 
+/**
+ * @brief 辅助函数：将单个元素包装成 tuple，如果是 std::array 则展开
+ */
+template <typename T>
+constexpr auto flatten_element(T&& val) {
+    return std::make_tuple(std::forward<T>(val));
+}
+
+template <typename T, std::size_t N>
+constexpr auto flatten_element(const std::array<T, N>& arr) {
+    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return std::make_tuple(arr[Is]...);
+    }(std::make_index_sequence<N>{});
+}
+
+/**
+ * @brief 将包含 std::array 的 tuple 打平为全标量 tuple
+ * 
+ * 这样可以利用 C++20 的大括号省略特性初始化含有 C 数组的结构体
+ */
+template <typename... Ts>
+constexpr auto flatten_tuple(const std::tuple<Ts...>& t) {
+    return std::apply([](const auto&... args) {
+        return std::tuple_cat(flatten_element(args)...);
+    }, t);
+}
+
 } // namespace RPL::Detail
 
 namespace RPL {
@@ -497,13 +548,16 @@ constexpr T deserialize_bitstream(std::span<const uint8_t> buffer) {
     using Layout = typename Meta::PacketTraits<T>::BitLayout;
     constexpr std::size_t N = std::tuple_size_v<Layout>;
 
-    // 1. 根据编译期布局将值提取到元组中
+    // 1. 根据编译期布局将值提取到元组中 (可能包含 std::array)
     auto values_tuple = Detail::parse_bitstream_impl<Layout>(
         buffer, std::make_index_sequence<N>{}
     );
 
-    // 2. 使用 C++20 聚合初始化完美赋值给原生位域
-    return std::make_from_tuple<T>(values_tuple);
+    // 2. 打平元组以支持 C 风格数组的聚合初始化
+    auto flat_tuple = Detail::flatten_tuple(values_tuple);
+
+    // 3. 使用 C++20 聚合初始化赋值
+    return std::make_from_tuple<T>(flat_tuple);
 }
 
 } // namespace RPL
@@ -1933,80 +1987,141 @@ namespace RPL::Detail {
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
-    static_assert(BitWidth <= sizeof(T) * 8, "BitWidth exceeds input type capacity");
+  if constexpr (Meta::is_std_array_v<T>) {
+    using ElementType = typename T::value_type;
+    constexpr std::size_t N = std::tuple_size_v<T>;
+    constexpr std::size_t bits_per_element = BitWidth / N;
+    static_assert(bits_per_element * N == BitWidth,
+                  "BitWidth must be a multiple of array size");
+
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      (inject_bits<ElementType, BitOffset + Is * bits_per_element,
+                   bits_per_element>(buffer, value[Is]),
+       ...);
+    }(std::make_index_sequence<N>{});
+  } else {
+    static_assert(BitWidth <= sizeof(T) * 8,
+                  "BitWidth exceeds input type capacity");
 
     std::size_t current_bit_offset = BitOffset;
     std::size_t bits_injected = 0;
 
     T masked_value = value;
     if constexpr (BitWidth < sizeof(T) * 8) {
-        masked_value &= (static_cast<T>(1) << BitWidth) - 1;
+      masked_value &= (static_cast<T>(1) << BitWidth) - 1;
     }
 
     while (bits_injected < BitWidth) {
-        std::size_t byte_index = current_bit_offset / 8;
-        std::size_t bit_in_byte = current_bit_offset % 8;
+      std::size_t byte_index = current_bit_offset / 8;
+      std::size_t bit_in_byte = current_bit_offset % 8;
 
-        std::size_t bits_to_put = std::min(BitWidth - bits_injected, static_cast<std::size_t>(8 - bit_in_byte));
+      std::size_t bits_to_put = std::min(
+          BitWidth - bits_injected, static_cast<std::size_t>(8 - bit_in_byte));
 
-        if (byte_index >= buffer.size()) {
-            break;
-        }
+      if (byte_index >= buffer.size()) {
+        break;
+      }
 
-        uint8_t chunk = static_cast<uint8_t>((masked_value >> bits_injected) & ((1ULL << bits_to_put) - 1));
-        chunk <<= bit_in_byte;
-        buffer[byte_index] |= chunk;
+      uint8_t chunk = static_cast<uint8_t>((masked_value >> bits_injected) &
+                                           ((1ULL << bits_to_put) - 1));
+      chunk <<= bit_in_byte;
+      buffer[byte_index] |= chunk;
 
-        bits_injected += bits_to_put;
-        current_bit_offset += bits_to_put;
+      bits_injected += bits_to_put;
+      current_bit_offset += bits_to_put;
     }
+  }
+}
+
+/**
+ * @brief 辅助函数：如果是 C 数组则转换为 std::array，否则保持原样
+ */
+template <typename T> constexpr auto to_array_if_needed(T &&val) {
+  if constexpr (std::is_array_v<std::remove_cvref_t<T>>) {
+    using Elem = std::remove_extent_t<std::remove_cvref_t<T>>;
+    constexpr size_t N = std::extent_v<std::remove_cvref_t<T>>;
+    std::array<Elem, N> result;
+    for (size_t i = 0; i < N; ++i)
+      result[i] = val[i];
+    return result;
+  } else {
+    return std::forward<T>(val);
+  }
 }
 
 /**
  * @brief 使用结构化绑定将结构体解包为成员元组
- *
- * 我们使用值绑定 (const auto [ ... ]) 而不是引用绑定 (auto& [ ... ])
- * 因为在 C++ 中绑定引用到位域是非法的。
- * 这可以安全地将位域值复制到纯标准元组中。
  */
-template <std::size_t N, typename T>
-constexpr auto struct_to_tuple(const T& obj) {
-    if constexpr (N == 1) {
-        const auto [m1] = obj; return std::make_tuple(m1);
-    } else if constexpr (N == 2) {
-        const auto [m1, m2] = obj; return std::make_tuple(m1, m2);
-    } else if constexpr (N == 3) {
-        const auto [m1, m2, m3] = obj; return std::make_tuple(m1, m2, m3);
-    } else if constexpr (N == 4) {
-        const auto [m1, m2, m3, m4] = obj; return std::make_tuple(m1, m2, m3, m4);
-    } else if constexpr (N == 5) {
-        const auto [m1, m2, m3, m4, m5] = obj; return std::make_tuple(m1, m2, m3, m4, m5);
-    } else if constexpr (N == 6) {
-        const auto [m1, m2, m3, m4, m5, m6] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6);
-    } else if constexpr (N == 7) {
-        const auto [m1, m2, m3, m4, m5, m6, m7] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7);
-    } else if constexpr (N == 8) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8);
-    } else if constexpr (N == 9) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9);
-    } else if constexpr (N == 10) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10);
-    } else if constexpr (N == 11) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11);
-    } else if constexpr (N == 12) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12);
-    } else if constexpr (N == 13) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13);
-    } else if constexpr (N == 14) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14);
-    } else if constexpr (N == 15) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15);
-    } else if constexpr (N == 16) {
-        const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16] = obj; return std::make_tuple(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16);
-    } else {
-        static_assert(N <= 16, "struct_to_tuple supports up to 16 fields. Add more branches to support more!");
-        return std::make_tuple();
-    }
+template <std::size_t N, typename T> constexpr auto struct_to_tuple(const T &obj) {
+  if constexpr (N == 1) { const auto [m1] = obj; return std::make_tuple(to_array_if_needed(m1)); }
+  else if constexpr (N == 2) { const auto [m1, m2] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2)); }
+  else if constexpr (N == 3) { const auto [m1, m2, m3] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3)); }
+  else if constexpr (N == 4) { const auto [m1, m2, m3, m4] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4)); }
+  else if constexpr (N == 5) { const auto [m1, m2, m3, m4, m5] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5)); }
+  else if constexpr (N == 6) { const auto [m1, m2, m3, m4, m5, m6] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6)); }
+  else if constexpr (N == 7) { const auto [m1, m2, m3, m4, m5, m6, m7] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7)); }
+  else if constexpr (N == 8) { const auto [m1, m2, m3, m4, m5, m6, m7, m8] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8)); }
+  else if constexpr (N == 9) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9)); }
+  else if constexpr (N == 10) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10)); }
+  else if constexpr (N == 11) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11)); }
+  else if constexpr (N == 12) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12)); }
+  else if constexpr (N == 13) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13)); }
+  else if constexpr (N == 14) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14)); }
+  else if constexpr (N == 15) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15)); }
+  else if constexpr (N == 16) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16)); }
+  else if constexpr (N == 17) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17)); }
+  else if constexpr (N == 18) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18)); }
+  else if constexpr (N == 19) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19)); }
+  else if constexpr (N == 20) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20)); }
+  else if constexpr (N == 21) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21)); }
+  else if constexpr (N == 22) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22)); }
+  else if constexpr (N == 23) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23)); }
+  else if constexpr (N == 24) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24)); }
+  else if constexpr (N == 25) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25)); }
+  else if constexpr (N == 26) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26)); }
+  else if constexpr (N == 27) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27)); }
+  else if constexpr (N == 28) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28)); }
+  else if constexpr (N == 29) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29)); }
+  else if constexpr (N == 30) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), house_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30)); }
+  else if constexpr (N == 31) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31)); }
+  else if constexpr (N == 32) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32)); }
+  else if constexpr (N == 33) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33)); }
+  else if constexpr (N == 34) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34)); }
+  else if constexpr (N == 35) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35)); }
+  else if constexpr (N == 36) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36)); }
+  else if constexpr (N == 37) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37)); }
+  else if constexpr (N == 38) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38)); }
+  else if constexpr (N == 39) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39)); }
+  else if constexpr (N == 40) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40)); }
+  else if constexpr (N == 41) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41)); }
+  else if constexpr (N == 42) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42)); }
+  else if constexpr (N == 43) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43)); }
+  else if constexpr (N == 44) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44)); }
+  else if constexpr (N == 45) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45)); }
+  else if constexpr (N == 46) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46)); }
+  else if constexpr (N == 47) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47)); }
+  else if constexpr (N == 48) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48)); }
+  else if constexpr (N == 49) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49)); }
+  else if constexpr (N == 50) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50)); }
+  else if constexpr (N == 51) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51)); }
+  else if constexpr (N == 52) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52)); }
+  else if constexpr (N == 53) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53)); }
+  else if constexpr (N == 54) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54)); }
+  else if constexpr (N == 55) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55)); }
+  else if constexpr (N == 56) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56)); }
+  else if constexpr (N == 57) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57)); }
+  else if constexpr (N == 58) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58)); }
+  else if constexpr (N == 59) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59)); }
+  else if constexpr (N == 60) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60)); }
+  else if constexpr (N == 61) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61)); }
+  else if constexpr (N == 62) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61, m62] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), Fade_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61), to_array_if_needed(m62)); }
+  else if constexpr (N == 63) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61, m62, m63] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61), to_array_if_needed(m62), to_array_if_needed(m63)); }
+  else if constexpr (N == 64) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61, m62, m63, m64] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61), to_array_if_needed(m62), to_array_if_needed(m63), to_array_if_needed(m64)); }
+  else {
+    static_assert(N <= 64, "struct_to_tuple supports up to 64 fields. Add more "
+                           "branches to support more!");
+    return std::make_tuple();
+  }
 }
 
 } // namespace RPL::Detail
@@ -2020,32 +2135,31 @@ namespace RPL {
  * 到字节序列中正确的编译期偏移处。
  */
 template <typename T>
-requires Meta::HasBitLayout<Meta::PacketTraits<T>>
-constexpr void serialize_bitstream(std::span<uint8_t> buffer, const T& packet) {
-    using Layout = typename Meta::PacketTraits<T>::BitLayout;
-    constexpr std::size_t N = std::tuple_size_v<Layout>;
+  requires Meta::HasBitLayout<Meta::PacketTraits<T>>
+constexpr void serialize_bitstream(std::span<uint8_t> buffer, const T &packet) {
+  using Layout = typename Meta::PacketTraits<T>::BitLayout;
+  constexpr std::size_t N = std::tuple_size_v<Layout>;
 
-    // 1. 将结构体解包为值元组 (对位域安全)
-    auto values = Detail::struct_to_tuple<N>(packet);
+  // 1. 将结构体解包为值元组 (对位域安全)
+  auto values = Detail::struct_to_tuple<N>(packet);
 
-    // 在编译期计算位偏移的前缀和
-    constexpr auto offsets = []() {
-        std::array<std::size_t, N + 1> arr{0};
-        std::size_t current = 0;
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ((arr[Is + 1] = current += std::tuple_element_t<Is, Layout>::bits), ...);
-        }(std::make_index_sequence<N>{});
-        return arr;
-    }();
-
-    // 2. 将每个元组元素注入到字节序列中编译期计算的偏移处
+  // 在编译期计算位偏移的前缀和
+  constexpr auto offsets = []() {
+    std::array<std::size_t, N + 1> arr{0};
+    std::size_t current = 0;
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        (Detail::inject_bits<
-            typename std::tuple_element_t<Is, Layout>::type,
-            offsets[Is],
-            std::tuple_element_t<Is, Layout>::bits
-        >(buffer, std::get<Is>(values)), ...);
+      ((arr[Is + 1] = current += std::tuple_element_t<Is, Layout>::bits), ...);
     }(std::make_index_sequence<N>{});
+    return arr;
+  }();
+
+  // 2. 将每个元组元素注入到字节序列中编译期计算的偏移处
+  [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+    (Detail::inject_bits<typename std::tuple_element_t<Is, Layout>::type,
+                         offsets[Is], std::tuple_element_t<Is, Layout>::bits>(
+         buffer, std::get<Is>(values)),
+     ...);
+  }(std::make_index_sequence<N>{});
 }
 
 } // namespace RPL

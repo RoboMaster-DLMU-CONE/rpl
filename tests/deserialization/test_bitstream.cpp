@@ -80,7 +80,7 @@ void test_cross_byte_parse() {
     std::cout << "test_cross_byte_parse passed!" << std::endl;
 }
 
-// --- Test 3: Mixed packet with std::array ---
+// --- Test 3: Mixed packet with std::array (Pure C++) ---
 struct MixedPacket {
     uint8_t a : 4;
     uint8_t b : 4;

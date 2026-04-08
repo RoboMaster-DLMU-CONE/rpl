@@ -1,4 +1,4 @@
-#include <RPL/Packets/RoboMaster/CustomControllerData.hpp>
+#include <RPL/Packets/RoboMaster/CustomControllerData.h>
 #include <RPL/Packets/VT03RemotePacket.hpp>
 #include <RPL/Serializer.hpp>
 #include <cassert>

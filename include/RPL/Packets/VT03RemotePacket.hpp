@@ -1,10 +1,20 @@
 #ifndef RPL_PACKETS_VT03_REMOTE_PACKET_HPP
 #define RPL_PACKETS_VT03_REMOTE_PACKET_HPP
 
+#ifdef __cplusplus
+#include "RPL/Meta/BitstreamTraits.hpp"
 #include "RPL/Meta/PacketTraits.hpp"
 #include "RPL/Utils/Def.hpp"
 #include <cstdint>
+#include <tuple>
+#else
+#include <stdint.h>
+#endif // __cplusplus
 
+#ifdef __cplusplus
+/**
+ * @brief VT03 图传协议定义
+ */
 struct VT03RemoteProtocol {
   // --- 帧头识别 ---
   static constexpr uint8_t start_byte = 0xA9;
@@ -28,6 +38,7 @@ struct VT03RemoteProtocol {
   static constexpr size_t cmd_offset = 0;
   static constexpr size_t cmd_field_bytes = 0;
 };
+#endif // __cplusplus
 
 /**
  * @brief VT03/VT13 图传模块遥控数据包
@@ -36,9 +47,6 @@ struct VT03RemoteProtocol {
  * 数据位压缩存储，总载荷长度 17 字节。
  */
 struct VT03RemotePacket {
-  static constexpr uint16_t cmd = 0xA953; // 使用帧头作为命令码
-  static constexpr size_t size = 17;      // 载荷大小
-
   // --- 字节 0-7 (64 bits) ---
   // 摇杆通道 (11 bits each)
   uint64_t right_stick_x : 11;   ///< bit 0-10: 右摇杆水平 (364-1684)
@@ -54,16 +62,11 @@ struct VT03RemotePacket {
   uint64_t reserved_padding : 3; ///< bit 61-63: 填充
 
   // --- 字节 8-13 (48 bits) ---
-  // Mouse X: Offset 80, Len 16. (Local 64-79).
   int16_t mouse_x; ///< bit 64-79
   int16_t mouse_y; ///< bit 80-95
   int16_t mouse_z; ///< bit 96-111
 
   // --- 字节 14 (8 bits) ---
-  // Mouse Left: Offset 128, Len 2. (Local 112-113).
-  // Mouse Right: Offset 130, Len 2. (Local 114-115).
-  // Mouse Middle: Offset 132, Len 2. (Local 116-117).
-  // Gap: 134-135 (2 bits).
   uint8_t mouse_left : 1;       ///< bit 112 (value bit)
   uint8_t mouse_left_pad : 1;   ///< bit 113 (padding)
   uint8_t mouse_right : 1;      ///< bit 114
@@ -73,7 +76,6 @@ struct VT03RemotePacket {
   uint8_t mouse_reserved : 2;   ///< bit 118-119 (padding to 120/136)
 
   // --- 字节 15-16 (16 bits) ---
-  // Keyboard: Offset 136, Len 16. (Local 120-135).
   uint16_t key_w : 1;     ///< bit 0
   uint16_t key_s : 1;     ///< bit 1
   uint16_t key_a : 1;     ///< bit 2
@@ -92,11 +94,36 @@ struct VT03RemotePacket {
   uint16_t key_b : 1;     ///< bit 15
 } __attribute__((packed));
 
-namespace RPL::Meta {
+#ifdef __cplusplus
 template <>
-struct PacketTraits<VT03RemotePacket> : PacketTraitsBase<VT03RemotePacket> {
+struct RPL::Meta::PacketTraits<VT03RemotePacket> : PacketTraitsBase<PacketTraits<VT03RemotePacket>> {
+  static constexpr uint16_t cmd = 0xA953;
+  static constexpr size_t size = 17;
   using Protocol = VT03RemoteProtocol;
+
+  using BitLayout = std::tuple<
+      RPL::Meta::Field<uint64_t, 11>, RPL::Meta::Field<uint64_t, 11>,
+      RPL::Meta::Field<uint64_t, 11>, RPL::Meta::Field<uint64_t, 11>,
+      RPL::Meta::Field<uint64_t, 2>,  RPL::Meta::Field<uint64_t, 1>,
+      RPL::Meta::Field<uint64_t, 1>,  RPL::Meta::Field<uint64_t, 1>,
+      RPL::Meta::Field<uint64_t, 11>, RPL::Meta::Field<uint64_t, 1>,
+      RPL::Meta::Field<uint64_t, 3>,
+      RPL::Meta::Field<int16_t, 16>,  RPL::Meta::Field<int16_t, 16>,
+      RPL::Meta::Field<int16_t, 16>,
+      RPL::Meta::Field<uint8_t, 1>,   RPL::Meta::Field<uint8_t, 1>,
+      RPL::Meta::Field<uint8_t, 1>,   RPL::Meta::Field<uint8_t, 1>,
+      RPL::Meta::Field<uint8_t, 1>,   RPL::Meta::Field<uint8_t, 1>,
+      RPL::Meta::Field<uint8_t, 2>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>,
+      RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>
+  >;
 };
-} // namespace RPL::Meta
+#endif // __cplusplus
 
 #endif // RPL_PACKETS_VT03_REMOTE_PACKET_HPP
