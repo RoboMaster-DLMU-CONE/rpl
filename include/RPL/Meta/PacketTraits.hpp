@@ -2,8 +2,18 @@
  * @file PacketTraits.hpp
  * @brief RPL库的数据包特性定义
  *
- * 此文件定义了数据包特性的基类和模板特化结构。
- * 用于描述数据包的命令码、大小等元信息。
+ * 此文件定义了数据包特性的基类和模板特化结构，
+ * 用于描述数据包的命令码、大小、协议格式等元信息。
+ *
+ * @par 核心组件
+ * - DefaultProtocol: 默认 RoboMaster 协议定义
+ * - PacketTraitsBase: 数据包特性基类
+ * - PacketTraits<T>: 数据包特性模板（需用户特化）
+ *
+ * @par 设计原理
+ * - 通过模板特化在编译期定义数据包属性
+ * - 支持自定义协议覆盖默认设置
+ * - 提供扩展点（如 before_get_custom）
  *
  * @author WindWeaver
  */
@@ -19,17 +29,42 @@ namespace RPL::Meta {
 /**
  * @brief 默认 RoboMaster 协议定义
  *
- * 定义标准 RoboMaster 裁判系统协议的特征
+ * 定义标准 RoboMaster 裁判系统协议的特征。
+ * 用户可以通过在 PacketTraits 特化中定义 `using Protocol = MyProtocol;`
+ * 来覆盖此默认设置。
+ *
+ * @par 协议格式
+ * ```
+ * | Start Byte | Length | Seq | Header CRC | Cmd ID | Data | Frame CRC16 |
+ * | 1 byte     | 2 bytes| 1B  | 1 byte     | 2 bytes| N bytes | 2 bytes   |
+ * ```
+ *
+ * @par 使用示例
+ * @code
+ * // 自定义协议
+ * struct MyProtocol {
+ *     static constexpr uint8_t start_byte = 0xAA;
+ *     static constexpr bool has_second_byte = true;
+ *     static constexpr uint8_t second_byte = 0x55;
+ *     // ... 其他设置
+ * };
+ * 
+ * // 在 PacketTraits 特化中使用
+ * template <> struct PacketTraits<MyPacket> : PacketTraitsBase<MyPacket> {
+ *     using Protocol = MyProtocol;
+ *     // ...
+ * };
+ * @endcode
  */
 struct DefaultProtocol {
   // --- 帧头识别 ---
-  static constexpr uint8_t start_byte = 0xA5;    ///< 起始字节
+  static constexpr uint8_t start_byte = 0xA5;    ///< 起始字节（帧同步标识）
   static constexpr bool has_second_byte = false; ///< 是否有第二个固定字节
   static constexpr uint8_t second_byte =
       0x00; ///< 第二个固定字节（如果 has_second_byte 为 false 则忽略）
 
   // --- 结构大小 ---
-  static constexpr size_t header_size = 7; ///< 帧头总长度
+  static constexpr size_t header_size = 7; ///< 帧头总长度（字节）
   static constexpr size_t tail_size = 2;   ///< 帧尾长度（通常为CRC16）
 
   // --- 校验 ---
@@ -37,8 +72,8 @@ struct DefaultProtocol {
   static constexpr size_t header_crc_offset = 4; ///< 帧头校验字节偏移量
 
   // --- 序列号 ---
-  static constexpr bool has_seq_field = true;
-  static constexpr size_t seq_offset = 3; ///< 序列号偏移量
+  static constexpr bool has_seq_field = true;    ///< 是否有序列号字段
+  static constexpr size_t seq_offset = 3;        ///< 序列号偏移量（字节）
 
   // --- CRC类型定义 ---
   /**
@@ -75,21 +110,39 @@ struct DefaultProtocol {
 /**
  * @brief 数据包特性基类
  *
- * 提供数据包特性的基础实现，包括命令码、大小和获取前的处理
+ * 提供数据包特性的基础实现，包括命令码、大小和获取前的处理。
+ * 用户的数据包类型应继承此类并特化相应的模板参数。
  *
- * @tparam Derived 派生类类型
+ * @tparam Derived 派生类类型（CRTP 模式）
+ *
+ * @par 使用示例
+ * @code
+ * struct MyPacket {
+ *     uint8_t flags;
+ *     int16_t value;
+ * };
+ * 
+ * template <>
+ * struct PacketTraits<MyPacket> : PacketTraitsBase<MyPacket> {
+ *     static constexpr uint16_t cmd = 0x0102;
+ *     static constexpr size_t size = sizeof(MyPacket);
+ * };
+ * @endcode
  */
 template <typename Derived> struct PacketTraitsBase {
-  static constexpr uint16_t cmd = Derived::cmd; ///< 命令码
-  static constexpr size_t size = Derived::size; ///< 数据包大小
+  /// @brief 命令码（由派生类定义）
+  static constexpr uint16_t cmd = Derived::cmd;
+  /// @brief 数据包大小（由派生类定义）
+  static constexpr size_t size = Derived::size;
 
-  /// 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
+  /// @brief 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
   using Protocol = DefaultProtocol;
 
   /**
    * @brief 获取数据包前的处理
    *
-   * 在获取数据包之前执行的处理函数，如果派生类定义了before_get_custom则调用它
+   * 在获取数据包之前执行的处理函数。
+   * 如果派生类定义了 before_get_custom 则调用它，可用于数据修复或转换。
    *
    * @param data 指向数据的指针
    */
@@ -105,9 +158,36 @@ template <typename Derived> struct PacketTraitsBase {
 /**
  * @brief 数据包特性模板
  *
- * 用于特化各种数据包类型的特性，包括命令码和大小
+ * 用于特化各种数据包类型的特性，包括命令码和大小。
+ * 用户需要为每个数据包类型提供此模板的特化。
  *
  * @tparam T 数据包类型
+ *
+ * @par 特化要求
+ * - 必须定义 `cmd` 静态常量（命令码）
+ * - 必须定义 `size` 静态常量（数据包大小）
+ * - 可选定义 `BitLayout` 类型（用于位流序列化/反序列化）
+ * - 可选定义 `before_get_custom` 函数（获取前处理）
+ *
+ * @par 完整特化示例
+ * @code
+ * struct MyPacket {
+ *     uint8_t flags;
+ *     int16_t channels[8];
+ * };
+ * 
+ * template <>
+ * struct PacketTraits<MyPacket> : PacketTraitsBase<MyPacket> {
+ *     static constexpr uint16_t cmd = 0x0102;
+ *     static constexpr size_t size = sizeof(MyPacket);
+ *     
+ *     // 可选：定义位流布局
+ *     using BitLayout = std::tuple<
+ *         Field<uint8_t, 3>,
+ *         Field<int16_t, 16, 8>
+ *     >;
+ * };
+ * @endcode
  */
 template <typename T> struct PacketTraits;
 } // namespace RPL::Meta

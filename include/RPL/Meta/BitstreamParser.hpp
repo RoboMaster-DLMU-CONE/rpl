@@ -1,3 +1,22 @@
+/**
+ * @file BitstreamParser.hpp
+ * @brief RPL 位流解析器实现
+ *
+ * 此文件提供位流反序列化功能，可以从字节流中提取位域数据并构造成结构体。
+ * 支持跨字节位提取、编译期优化和 C++20 聚合初始化。
+ *
+ * @par 设计原理
+ * - 使用编译期位偏移计算，运行时仅执行高效的位操作
+ * - 支持小端线格式 (little-endian wire format) 的位提取
+ * - 利用 C++20 括号省略特性初始化含有 C 数组的结构体
+ *
+ * @par 使用场景
+ * - 紧凑位域协议的解析（如遥控器协议）
+ * - 需要节省带宽的嵌入式通信
+ *
+ * @author WindWeaver
+ */
+
 #ifndef RPL_BITSTREAM_PARSER_HPP
 #define RPL_BITSTREAM_PARSER_HPP
 
@@ -19,11 +38,14 @@ namespace RPL::Detail {
  * 由于 BitOffset 和 BitWidth 是编译时常量，编译器会将此优化
  * 为高效的位操作。
  *
- * @tparam T 返回类型 (整数)
+ * @tparam T 返回类型 (整数或 std::array)
  * @tparam BitOffset 起始位索引 (0 是第一个字节的 LSB)
  * @tparam BitWidth 要提取的位数
  * @param buffer 要读取的字节序列
  * @return 提取的值并转换为类型 T
+ *
+ * @note 此函数是位流解析的核心，支持跨越字节边界的位提取
+ * @warning 如果 BitWidth 超过 T 的容量，将触发 static_assert
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr T extract_bits(std::span<const uint8_t> buffer) {
@@ -82,6 +104,14 @@ constexpr T extract_bits(std::span<const uint8_t> buffer) {
 
 /**
  * @brief 将位流布局解析为元组的核心实现
+ *
+ * 根据编译期的位布局定义，从字节缓冲区中提取所有位域并返回元组。
+ * 使用前缀和算法在编译期计算每个字段的位偏移。
+ *
+ * @tparam Layout 位布局定义（元组 Field 类型）
+ * @tparam Is 索引序列（用于展开折叠表达式）
+ * @param buffer 包含线格式数据的字节序列
+ * @return 包含所有提取值的元组
  */
 template <typename Layout, std::size_t... Is>
 constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_sequence<Is...>) {
@@ -105,12 +135,24 @@ constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_
 
 /**
  * @brief 辅助函数：将单个元素包装成 tuple，如果是 std::array 则展开
+ *
+ * @tparam T 元素类型
+ * @param val 要包装的值
+ * @return 包含元素的 tuple，如果是 std::array 则展开为多个元素
  */
 template <typename T>
 constexpr auto flatten_element(T&& val) {
     return std::make_tuple(std::forward<T>(val));
 }
 
+/**
+ * @brief 辅助函数：将 std::array 元素展开为 tuple
+ *
+ * @tparam T 数组元素类型
+ * @tparam N 数组大小
+ * @param arr 要展开的数组
+ * @return 包含数组所有元素的 tuple
+ */
 template <typename T, std::size_t N>
 constexpr auto flatten_element(const std::array<T, N>& arr) {
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -120,8 +162,13 @@ constexpr auto flatten_element(const std::array<T, N>& arr) {
 
 /**
  * @brief 将包含 std::array 的 tuple 打平为全标量 tuple
- * 
- * 这样可以利用 C++20 的大括号省略特性初始化含有 C 数组的结构体
+ *
+ * 这样可以利用 C++20 的大括号省略特性初始化含有 C 数组的结构体。
+ * 例如，tuple<int, std::array<float, 3>> 会被打平为 tuple<int, float, float, float>。
+ *
+ * @tparam Ts 元组元素类型
+ * @param t 要打平的元组
+ * @return 打平后的元组（所有 std::array 被展开）
  */
 template <typename... Ts>
 constexpr auto flatten_tuple(const std::tuple<Ts...>& t) {
@@ -137,12 +184,26 @@ namespace RPL {
 /**
  * @brief 使用位流布局定义反序列化数据包
  *
- * 从缓冲区中提取位域并安全地构造目标结构 T
- * 使用 C++20 括号聚合初始化。
+ * 从缓冲区中提取位域并安全地构造目标结构 T。
+ * 使用 C++20 括号聚合初始化，支持含有 C 数组的结构体。
  *
- * @tparam T 目标结构类型
+ * @tparam T 目标结构类型（必须有 BitLayout 特化）
  * @param buffer 包含线格式数据的字节序列
  * @return 正确初始化位域的结构
+ *
+ * @par 使用示例
+ * @code
+ * struct MyPacket {
+ *     uint8_t flags;
+ *     int16_t channels[8];
+ * };
+ * 
+ * // 在 PacketTraits 特化中定义 BitLayout...
+ * 
+ * auto packet = RPL::deserialize_bitstream<MyPacket>(buffer);
+ * @endcode
+ *
+ * @note 此函数要求 Meta::HasBitLayout<Meta::PacketTraits<T>> 为 true
  */
 template <typename T>
 requires Meta::HasBitLayout<Meta::PacketTraits<T>>

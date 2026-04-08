@@ -1,3 +1,22 @@
+/**
+ * @file BitstreamSerializer.hpp
+ * @brief RPL 位流序列化器实现
+ *
+ * 此文件提供位流序列化功能，可以将结构体数据打包为紧凑的位流字节序列。
+ * 支持跨字节位注入、编译期优化和 C 数组到 std::array 的自动转换。
+ *
+ * @par 设计原理
+ * - 使用编译期位偏移计算，运行时仅执行高效的位操作
+ * - 支持小端线格式 (little-endian wire format) 的位注入
+ * - 通过结构化绑定 (C++17) 自动解包结构体成员
+ *
+ * @par 使用场景
+ * - 紧凑位域协议的序列化（如遥控器协议）
+ * - 需要节省带宽的嵌入式通信
+ *
+ * @author WindWeaver
+ */
+
 #ifndef RPL_BITSTREAM_SERIALIZER_HPP
 #define RPL_BITSTREAM_SERIALIZER_HPP
 
@@ -18,6 +37,16 @@ namespace RPL::Detail {
  * 此函数处理跨字节位注入，采用小端线格式假设。
  * 由于 BitOffset 和 BitWidth 是编译时常量，编译器会将此优化
  * 为高效的位操作。
+ *
+ * @tparam T 值类型 (整数或 std::array)
+ * @tparam BitOffset 起始位索引 (0 是第一个字节的 LSB)
+ * @tparam BitWidth 要注入的位数
+ * @param buffer 要写入的字节序列
+ * @param value 要注入的值
+ *
+ * @note 此函数是位流序列化的核心，支持跨越字节边界的位注入
+ * @warning 如果 BitWidth 超过 T 的容量，将触发 static_assert
+ * @note 此函数采用 OR 操作注入位，缓冲区应预先清零
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
@@ -69,6 +98,13 @@ constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
 
 /**
  * @brief 辅助函数：如果是 C 数组则转换为 std::array，否则保持原样
+ *
+ * 用于处理结构化绑定中解包出的 C 数组成员，将其转换为 std::array
+ * 以便后续位注入操作。
+ *
+ * @tparam T 值类型
+ * @param val 要转换的值
+ * @return 如果是 C 数组则返回 std::array，否则返回转发后的值
  */
 template <typename T> constexpr auto to_array_if_needed(T &&val) {
   if constexpr (std::is_array_v<std::remove_cvref_t<T>>) {
@@ -85,6 +121,17 @@ template <typename T> constexpr auto to_array_if_needed(T &&val) {
 
 /**
  * @brief 使用结构化绑定将结构体解包为成员元组
+ *
+ * 此函数利用 C++17 的结构化绑定特性，将结构体的每个成员提取出来
+ * 并打包为元组。对于 C 数组成员，会自动转换为 std::array。
+ *
+ * @note 此函数支持 1 到 64 个成员的结构体
+ * @warning 如果结构体成员超过 64 个，需要添加更多分支或使用其他方法
+ *
+ * @tparam N 结构体成员数量
+ * @tparam T 结构体类型
+ * @param obj 要解包的结构体对象
+ * @return 包含所有成员的元组（C 数组已转换为 std::array）
  */
 template <std::size_t N, typename T> constexpr auto struct_to_tuple(const T &obj) {
   if constexpr (N == 1) { const auto [m1] = obj; return std::make_tuple(to_array_if_needed(m1)); }
@@ -167,6 +214,20 @@ namespace RPL {
  *
  * 使用结构化绑定从结构中提取位域并注入
  * 到字节序列中正确的编译期偏移处。
+ *
+ * @tparam T 目标结构类型（必须有 BitLayout 特化）
+ * @param buffer 要写入的字节序列（应预先清零）
+ * @param packet 要序列化的数据包对象
+ *
+ * @par 使用示例
+ * @code
+ * MyPacket packet{...};
+ * std::array<uint8_t, 16> buffer{}; // 初始化为 0
+ * RPL::serialize_bitstream(buffer, packet);
+ * @endcode
+ *
+ * @warning 缓冲区应预先清零，因为此函数使用 OR 操作注入位
+ * @note 此函数要求 Meta::HasBitLayout<Meta::PacketTraits<T>> 为 true
  */
 template <typename T>
   requires Meta::HasBitLayout<Meta::PacketTraits<T>>

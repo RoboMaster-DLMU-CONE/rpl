@@ -24,11 +24,16 @@
 #include <type_traits>
 #include <variant>
 
+/**
+ * @namespace RPL
+ * @brief RoboMaster Packet Library 的主命名空间
+ */
 namespace RPL {
 /**
  * @brief 可序列化概念
  *
- * 用于检查类型T是否为可序列化类型之一
+ * 用于检查类型 T 是否为可序列化类型之一。
+ * 此概念使用 std::decay_t 来忽略引用/const 限定符。
  *
  * @tparam T 要检查的类型
  * @tparam Ts 可序列化类型列表
@@ -39,22 +44,47 @@ concept Serializable = (std::is_same_v<std::decay_t<T>, Ts> || ...);
 /**
  * @brief 序列化器类
  *
- * 用于将数据包结构序列化为字节数组，包含帧头、命令码、数据长度、序列号和CRC校验
+ * 用于将数据包结构序列化为字节数组，包含帧头、命令码、数据长度、序列号和CRC校验。
  *
  * @tparam Ts 可序列化的数据包类型列表
+ *
+ * @par 使用示例
+ * @code
+ * RPL::Serializer<PacketA, PacketB> serializer;
+ * 
+ * std::array<uint8_t, 128> buffer;
+ * PacketA pkt_a{...};
+ * PacketB pkt_b{...};
+ * 
+ * auto result = serializer.serialize(buffer.data(), buffer.size(), pkt_a, pkt_b);
+ * if (result) {
+ *     // 发送 result.value() 字节的序列化数据
+ *     uart_send(buffer.data(), *result);
+ * }
+ * @endcode
+ *
+ * @par 序列化格式
+ * 根据 Protocol 定义，每个帧包含：
+ * - 帧头（起始字节、长度、序列号、Header CRC8）
+ * - 数据负载（命令码 + 数据）
+ * - 帧尾（Frame CRC16）
  */
 template <typename... Ts> class Serializer {
 public:
   /**
    * @brief 将数据包序列化到用户提供的缓冲区
    *
-   * 将多个数据包序列化为字节数组，每个数据包包含帧头、数据和帧尾
+   * 将多个数据包序列化为字节数组，每个数据包包含帧头、数据和帧尾。
+   * 序列号会在每次序列化后自动递增。
    *
    * @tparam Packets 要序列化的数据包类型列表
    * @param buffer 用户提供的输出缓冲区
    * @param size 缓冲区大小
    * @param packets 要序列化的数据包
    * @return 序列化成功时返回写入的字节数，失败时返回错误信息
+   *
+   * @note 数据包按参数顺序序列化，每个数据包独立成帧
+   * @warning 缓冲区大小必须足够容纳所有数据包的帧
    */
   template <typename... Packets>
     requires(Serializable<Packets, Ts...> && ...)
@@ -161,7 +191,7 @@ public:
   /**
    * @brief 计算指定类型的完整帧大小
    *
-   * 计算包含帧头、数据和帧尾的完整帧大小
+   * 计算包含帧头、数据和帧尾的完整帧大小。
    *
    * @tparam T 数据包类型
    * @return 完整帧大小（字节）
@@ -178,7 +208,7 @@ public:
   /**
    * @brief 计算指定命令码的完整帧大小
    *
-   * 根据命令码计算对应的完整帧大小
+   * 根据命令码计算对应的完整帧大小。
    *
    * @param cmd 命令码
    * @return 对应的完整帧大小（字节），如果命令码无效则返回0
@@ -193,7 +223,7 @@ public:
   /**
    * @brief 获取最大帧大小
    *
-   * 获取所有可序列化类型中的最大帧大小
+   * 获取所有可序列化类型中的最大帧大小，用于预分配缓冲区。
    *
    * @return 最大帧大小（字节）
    */
@@ -204,7 +234,7 @@ public:
   /**
    * @brief 检查命令码是否有效
    *
-   * 检查给定的命令码是否对应于任何可序列化类型
+   * 检查给定的命令码是否对应于任何可序列化类型。
    *
    * @param cmd 要检查的命令码
    * @return 如果命令码有效返回true，否则返回false
@@ -216,10 +246,10 @@ public:
   /**
    * @brief 通过命令码获取对应的类型索引
    *
-   * 获取与指定命令码关联的类型在模板参数列表中的索引（用于调试）
+   * 获取与指定命令码关联的类型在模板参数列表中的索引（用于调试）。
    *
    * @param cmd 命令码
-   * @return 类型索引，如果命令码无效则返回SIZE_MAX
+   * @return 类型索引，如果命令码无效则返回 SIZE_MAX
    */
   static constexpr size_t get_type_index_by_cmd(uint16_t cmd) noexcept {
     size_t index = 0;
@@ -256,7 +286,8 @@ public:
   /**
    * @brief 获取当前序列号
    *
-   * 获取当前的序列号值
+   * 获取当前的序列号值。
+   * 序列号在每次成功序列化后自动递增。
    *
    * @return 当前序列号
    */

@@ -27,14 +27,28 @@
 #include <tuple>
 #include <type_traits>
 
+/**
+ * @namespace RPL
+ * @brief RoboMaster Packet Library 的主命名空间
+ */
 namespace RPL {
 
 extern void RPL_ERROR_START_BYTE_COLLISION();
 
 namespace Details {
 // --- 类型去重工具 ---
+
+/**
+ * @brief 类型列表
+ * @tparam Ts 类型列表
+ */
 template <typename... Ts> struct TypeList {};
 
+/**
+ * @brief 检查类型是否在列表中
+ * @tparam T 要查找的类型
+ * @tparam List 类型列表
+ */
 template <typename T, typename List> struct Contains;
 template <typename T, typename... Ts>
 struct Contains<T, TypeList<Ts...>> : std::disjunction<std::is_same<T, Ts>...> {
@@ -55,13 +69,32 @@ struct UniqueImpl<TypeList<H, Ts...>, TypeList<Os...>> {
 template <typename... Ts>
 using UniqueTypes_t = typename UniqueImpl<TypeList<Ts...>, TypeList<>>::type;
 
-// --- 运行时获取 Tuple 元素 ---
+/**
+ * @brief 运行时获取 Tuple 元素
+ *
+ * 根据索引在运行时选择 tuple 元素并调用函数。
+ * 用于在运行时根据协议索引分发到编译期生成的 Worker。
+ *
+ * @tparam Tuple Tuple 类型
+ * @tparam Fn 函数对象类型
+ * @param i 索引
+ * @param t Tuple 实例
+ * @param f 要调用的函数
+ */
 template <typename Tuple, typename Fn, size_t... Is>
 constexpr void tuple_switch(size_t i, Tuple &&t, Fn &&f,
                             std::index_sequence<Is...>) {
   ((i == Is ? f(std::get<Is>(t)) : void()), ...);
 }
 
+/**
+ * @brief 便捷函数：运行时获取 Tuple 元素
+ * @tparam Tuple Tuple 类型
+ * @tparam Fn 函数对象类型
+ * @param i 索引
+ * @param t Tuple 实例
+ * @param f 要调用的函数
+ */
 template <typename Tuple, typename Fn>
 constexpr void runtime_get(size_t i, Tuple &&t, Fn &&f) {
   tuple_switch(i, std::forward<Tuple>(t), std::forward<Fn>(f),
@@ -70,14 +103,21 @@ constexpr void runtime_get(size_t i, Tuple &&t, Fn &&f) {
 }
 
 // --- ConnectionMonitor 检测工具 ---
-// 检查类型是否有 PacketTraits 特化 (即是否是数据包类型)
+
+/**
+ * @brief 检查类型是否有 PacketTraits 特化 (即是否是数据包类型)
+ * @tparam T 要检查的类型
+ */
 template <typename T>
 concept IsPacketType = requires {
   { Meta::PacketTraits<T>::cmd } -> std::convertible_to<uint16_t>;
   { Meta::PacketTraits<T>::size } -> std::convertible_to<size_t>;
 };
 
-// 检查类型是否是 ConnectionMonitor (满足 concept 且不是 Packet)
+/**
+ * @brief 检查类型是否是 ConnectionMonitor (满足 concept 且不是 Packet)
+ * @tparam T 要检查的类型
+ */
 template <typename T>
 struct IsConnectionMonitor
     : std::bool_constant<ConnectionMonitorConcept<T> && !IsPacketType<T>> {};
@@ -274,8 +314,16 @@ template <typename... Args> class Parser {
   using DeserializerType =
       typename DeserializerFromPackets<typename Extracted::Packets>::type;
 
-  // 解析结果枚举
-  enum class ParseResult { Success, Failure, Incomplete };
+  /**
+   * @brief 解析结果枚举
+   *
+   * 表示单次解析尝试的结果状态。
+   */
+  enum class ParseResult { 
+    Success,    ///< 成功解析一个完整帧
+    Failure,    ///< 解析失败（校验错误等），需要丢弃数据并重试
+    Incomplete  ///< 数据不完整，需要等待更多数据
+  };
 
   // --- 成员变量 ---
   Containers::BipBuffer<buffer_size> buffer;
@@ -301,6 +349,16 @@ public:
     return monitor_;
   }
 
+  /**
+   * @brief 推送数据到解析器
+   *
+   * 将接收到的数据写入内部缓冲区，并尝试解析数据包。
+   * 解析成功后，数据会自动从缓冲区移除。
+   *
+   * @param data 指向输入数据的指针
+   * @param length 数据长度
+   * @return void 或错误（缓冲区溢出）
+   */
   tl::expected<void, Error> push_data(const uint8_t *data,
                                       const size_t length) {
     if (!buffer.write(data, length)) {
@@ -310,10 +368,27 @@ public:
     return try_parse_packets();
   }
 
+  /**
+   * @brief 获取写入缓冲区（零拷贝）
+   *
+   * 返回一段连续的可写内存区域，供 DMA 或其他零拷贝写入使用。
+   * 写入后必须调用 advance_write_index() 提交。
+   *
+   * @return 可写入的连续内存 span
+   */
   std::span<uint8_t> get_write_buffer() noexcept {
     return buffer.get_write_buffer();
   }
 
+  /**
+   * @brief 提交写入缓冲区的数据
+   *
+   * 在使用 get_write_buffer() 获取的缓冲区写入后调用此方法。
+   * 提交后会尝试解析新数据。
+   *
+   * @param length 已写入的字节数
+   * @return void 或错误（提交长度无效）
+   */
   tl::expected<void, Error> advance_write_index(size_t length) {
     if (!buffer.advance_write_index(length)) {
       return tl::unexpected(
@@ -322,12 +397,46 @@ public:
     return try_parse_packets();
   }
 
+  /**
+   * @brief 获取反序列化器的引用
+   * @return 反序列化器引用
+   */
   DeserializerType &get_deserializer() noexcept { return deserializer; }
+  
+  /**
+   * @brief 获取可用数据字节数
+   * @return 当前缓冲区中可读数据的总字节数
+   */
   size_t available_data() const noexcept { return buffer.available(); }
+  
+  /**
+   * @brief 获取可用写入空间
+   * @return 总空闲字节数
+   */
   size_t available_space() const noexcept { return buffer.space(); }
+  
+  /**
+   * @brief 检查缓冲区是否已满
+   * @return true 如果没有可用写入空间
+   */
   bool is_buffer_full() const noexcept { return buffer.full(); }
+  
+  /**
+   * @brief 清空缓冲区
+   * 丢弃所有未处理的数据
+   */
   void clear_buffer() noexcept { buffer.clear(); }
 
+  /**
+   * @brief 尝试解析缓冲区中的数据包
+   *
+   * 从当前读取位置开始扫描，查找并解析完整的数据帧。
+   * 解析成功后，已处理的数据会自动从缓冲区移除。
+   *
+   * @return void 或错误（解析错误）
+   * @note 此方法由 push_data() 和 advance_write_index() 自动调用
+   *       也可以手动调用以在特定时间点触发解析
+   */
   tl::expected<void, Error> try_parse_packets() {
     size_t available_bytes = buffer.available();
 
