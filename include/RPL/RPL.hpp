@@ -235,10 +235,18 @@ using ProtocolCRC16 = CRC16::MCRF4XX;
 
 /**
  * @file MemoryPool.hpp
- * @brief RPL库的内存池实现
+ * @brief RPL库的静态内存池实现
  *
- * 此文件包含MemoryPool类的定义，用于管理反序列化数据的内存分配。
+ * 此文件包含 MemoryPool 类的定义，用于管理反序列化数据的内存分配。
  * 内存池通过预分配固定大小的内存块来避免动态分配，提高性能。
+ *
+ * MemoryPool 是一个简单的静态内存分配器，它在编译期根据 Collector
+ * 提供的 totalSize 常量预分配内存。这种设计避免了运行时动态内存分配，
+ * 非常适合嵌入式系统。
+ *
+ * @par 使用场景
+ * - Deserializer 类用于存储反序列化后的数据包
+ * - 需要固定内存地址且无动态分配的场景
  *
  * @author WindWeaver
  */
@@ -246,53 +254,124 @@ using ProtocolCRC16 = CRC16::MCRF4XX;
 namespace RPL::Containers
 {
     /**
-     * @brief 内存池结构体
+     * @brief 静态内存池结构体
      *
-     * 用于管理反序列化数据的内存分配，通过预分配固定大小的内存块来避免动态分配
+     * 用于管理反序列化数据的内存分配，通过预分配固定大小的内存块来避免动态分配。
+     * 内存池的大小在编译期由 Collector::totalSize 确定。
      *
-     * @tparam Collector 用于收集包信息的类型，提供totalSize常量
+     * @tparam Collector 用于收集包信息的类型，必须提供 totalSize 静态常量
+     *
+     * @note 内存缓冲区使用 std::max_align_t 对齐，以确保任何数据类型的访问都是安全的
      */
     template <typename Collector>
     struct MemoryPool
     {
+        /**
+         * @brief 预分配的内存缓冲区
+         *
+         * 使用 std::max_align_t 对齐的静态内存缓冲区，
+         * 大小由 Collector::totalSize 在编译期确定。
+         */
         alignas(std::max_align_t) std::array<std::byte, Collector::totalSize> buffer{};  ///< 预分配的内存缓冲区
     };
 }
+
+/**
+ * @file BitstreamParser.hpp
+ * @brief RPL 位流解析器实现
+ *
+ * 此文件提供位流反序列化功能，可以从字节流中提取位域数据并构造成结构体。
+ * 支持跨字节位提取、编译期优化和 C++20 聚合初始化。
+ *
+ * @par 设计原理
+ * - 使用编译期位偏移计算，运行时仅执行高效的位操作
+ * - 支持小端线格式 (little-endian wire format) 的位提取
+ * - 利用 C++20 括号省略特性初始化含有 C 数组的结构体
+ *
+ * @par 使用场景
+ * - 紧凑位域协议的解析（如遥控器协议）
+ * - 需要节省带宽的嵌入式通信
+ *
+ * @author WindWeaver
+ */
+
+/**
+ * @file BitstreamTraits.hpp
+ * @brief RPL 位流特性定义
+ *
+ * 此文件提供位流解析/序列化的基础类型和概念定义。
+ * 包括 Field 描述器用于定义位域的线格式布局，
+ * 以及 HasBitLayout 概念用于检查类型是否定义了位流布局。
+ *
+ * @par 设计原理
+ * - Field 模板用于声明每个位域的底层类型和位数
+ * - HasBitLayout concept 用于启用/禁用位流处理代码路径
+ *
+ * @author WindWeaver
+ */
 
 namespace RPL::Meta {
 
 /**
  * @brief 检查类型是否为 std::array
+ *
+ * @tparam T 要检查的类型
  */
 template <typename T>
 struct is_std_array : std::false_type {};
+
+/**
+ * @brief std::array 的特化
+ * @tparam T 数组元素类型
+ * @tparam N 数组大小
+ */
 template <typename T, std::size_t N>
 struct is_std_array<std::array<T, N>> : std::true_type {};
+
+/// @brief is_std_array 的便捷别名
 template <typename T>
 inline constexpr bool is_std_array_v = is_std_array<T>::value;
 
 /**
- * @brief 位流解析的字段描述器
+ * @brief 位流解析/序列化的字段描述器
  *
- * 用于 PacketTraits::BitLayout 中定义位域的线格式
+ * 用于 PacketTraits::BitLayout 中定义位域的线格式。
+ * 每个 Field 实例描述一个字段的底层类型和占用的位数。
  *
- * @tparam T 底层整数类型 (uint8_t, uint16_t 等)
+ * @tparam T 底层整数类型 (uint8_t, uint16_t 等) 或 std::array
  * @tparam Bits 该字段在线上占用的确切位数
+ *
+ * @par 使用示例
+ * @code
+ * using BitLayout = std::tuple<
+ *     Field<uint8_t, 3>,   // 3位标志字段
+ *     Field<uint16_t, 11>, // 11位通道值
+ *     Field<int16_t, 16>   // 16位有符号值
+ * >;
+ * @endcode
+ *
+ * @note 所有字段的位数之和必须等于数据包的总位数
  */
 template <typename T, std::size_t Bits = sizeof(T) * 8>
 struct Field {
     // We allow integral types or std::array
-    // static_assert(std::is_integral_v<T>, "Field type must be an integral type"); 
+    // static_assert(std::is_integral_v<T>, "Field type must be an integral type");
+    /// @brief 位数必须为正数
     static_assert(Bits > 0, "Bits must be positive");
 
+    /// @brief 字段的基础类型
     using type = T;
+    /// @brief 字段占用的位数
     static constexpr std::size_t bits = Bits;
 };
 
 /**
- * @brief 检查 PacketTraits 是否定义了 BitLayout 的概念
+ * @brief 检查 PacketTraits 是否定义了 BitLayout
  *
- * 用于有条件地启用位流解析或直接 memcpy
+ * 用于有条件地启用位流解析或直接 memcpy。
+ * 如果 PacketTraits<T> 定义了 BitLayout 类型别名，则此概念为 true。
+ *
+ * @tparam Traits 要检查的 PacketTraits 特化
  */
 template <typename Traits>
 concept HasBitLayout = requires {
@@ -305,8 +384,18 @@ concept HasBitLayout = requires {
  * @file PacketTraits.hpp
  * @brief RPL库的数据包特性定义
  *
- * 此文件定义了数据包特性的基类和模板特化结构。
- * 用于描述数据包的命令码、大小等元信息。
+ * 此文件定义了数据包特性的基类和模板特化结构，
+ * 用于描述数据包的命令码、大小、协议格式等元信息。
+ *
+ * @par 核心组件
+ * - DefaultProtocol: 默认 RoboMaster 协议定义
+ * - PacketTraitsBase: 数据包特性基类
+ * - PacketTraits<T>: 数据包特性模板（需用户特化）
+ *
+ * @par 设计原理
+ * - 通过模板特化在编译期定义数据包属性
+ * - 支持自定义协议覆盖默认设置
+ * - 提供扩展点（如 before_get_custom）
  *
  * @author WindWeaver
  */
@@ -315,17 +404,42 @@ namespace RPL::Meta {
 /**
  * @brief 默认 RoboMaster 协议定义
  *
- * 定义标准 RoboMaster 裁判系统协议的特征
+ * 定义标准 RoboMaster 裁判系统协议的特征。
+ * 用户可以通过在 PacketTraits 特化中定义 `using Protocol = MyProtocol;`
+ * 来覆盖此默认设置。
+ *
+ * @par 协议格式
+ * ```
+ * | Start Byte | Length | Seq | Header CRC | Cmd ID | Data | Frame CRC16 |
+ * | 1 byte     | 2 bytes| 1B  | 1 byte     | 2 bytes| N bytes | 2 bytes   |
+ * ```
+ *
+ * @par 使用示例
+ * @code
+ * // 自定义协议
+ * struct MyProtocol {
+ *     static constexpr uint8_t start_byte = 0xAA;
+ *     static constexpr bool has_second_byte = true;
+ *     static constexpr uint8_t second_byte = 0x55;
+ *     // ... 其他设置
+ * };
+ * 
+ * // 在 PacketTraits 特化中使用
+ * template <> struct PacketTraits<MyPacket> : PacketTraitsBase<MyPacket> {
+ *     using Protocol = MyProtocol;
+ *     // ...
+ * };
+ * @endcode
  */
 struct DefaultProtocol {
   // --- 帧头识别 ---
-  static constexpr uint8_t start_byte = 0xA5;    ///< 起始字节
+  static constexpr uint8_t start_byte = 0xA5;    ///< 起始字节（帧同步标识）
   static constexpr bool has_second_byte = false; ///< 是否有第二个固定字节
   static constexpr uint8_t second_byte =
       0x00; ///< 第二个固定字节（如果 has_second_byte 为 false 则忽略）
 
   // --- 结构大小 ---
-  static constexpr size_t header_size = 7; ///< 帧头总长度
+  static constexpr size_t header_size = 7; ///< 帧头总长度（字节）
   static constexpr size_t tail_size = 2;   ///< 帧尾长度（通常为CRC16）
 
   // --- 校验 ---
@@ -333,8 +447,8 @@ struct DefaultProtocol {
   static constexpr size_t header_crc_offset = 4; ///< 帧头校验字节偏移量
 
   // --- 序列号 ---
-  static constexpr bool has_seq_field = true;
-  static constexpr size_t seq_offset = 3; ///< 序列号偏移量
+  static constexpr bool has_seq_field = true;    ///< 是否有序列号字段
+  static constexpr size_t seq_offset = 3;        ///< 序列号偏移量（字节）
 
   // --- CRC类型定义 ---
   /**
@@ -371,21 +485,39 @@ struct DefaultProtocol {
 /**
  * @brief 数据包特性基类
  *
- * 提供数据包特性的基础实现，包括命令码、大小和获取前的处理
+ * 提供数据包特性的基础实现，包括命令码、大小和获取前的处理。
+ * 用户的数据包类型应继承此类并特化相应的模板参数。
  *
- * @tparam Derived 派生类类型
+ * @tparam Derived 派生类类型（CRTP 模式）
+ *
+ * @par 使用示例
+ * @code
+ * struct MyPacket {
+ *     uint8_t flags;
+ *     int16_t value;
+ * };
+ * 
+ * template <>
+ * struct PacketTraits<MyPacket> : PacketTraitsBase<MyPacket> {
+ *     static constexpr uint16_t cmd = 0x0102;
+ *     static constexpr size_t size = sizeof(MyPacket);
+ * };
+ * @endcode
  */
 template <typename Derived> struct PacketTraitsBase {
-  static constexpr uint16_t cmd = Derived::cmd; ///< 命令码
-  static constexpr size_t size = Derived::size; ///< 数据包大小
+  /// @brief 命令码（由派生类定义）
+  static constexpr uint16_t cmd = Derived::cmd;
+  /// @brief 数据包大小（由派生类定义）
+  static constexpr size_t size = Derived::size;
 
-  /// 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
+  /// @brief 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
   using Protocol = DefaultProtocol;
 
   /**
    * @brief 获取数据包前的处理
    *
-   * 在获取数据包之前执行的处理函数，如果派生类定义了before_get_custom则调用它
+   * 在获取数据包之前执行的处理函数。
+   * 如果派生类定义了 before_get_custom 则调用它，可用于数据修复或转换。
    *
    * @param data 指向数据的指针
    */
@@ -401,9 +533,36 @@ template <typename Derived> struct PacketTraitsBase {
 /**
  * @brief 数据包特性模板
  *
- * 用于特化各种数据包类型的特性，包括命令码和大小
+ * 用于特化各种数据包类型的特性，包括命令码和大小。
+ * 用户需要为每个数据包类型提供此模板的特化。
  *
  * @tparam T 数据包类型
+ *
+ * @par 特化要求
+ * - 必须定义 `cmd` 静态常量（命令码）
+ * - 必须定义 `size` 静态常量（数据包大小）
+ * - 可选定义 `BitLayout` 类型（用于位流序列化/反序列化）
+ * - 可选定义 `before_get_custom` 函数（获取前处理）
+ *
+ * @par 完整特化示例
+ * @code
+ * struct MyPacket {
+ *     uint8_t flags;
+ *     int16_t channels[8];
+ * };
+ * 
+ * template <>
+ * struct PacketTraits<MyPacket> : PacketTraitsBase<MyPacket> {
+ *     static constexpr uint16_t cmd = 0x0102;
+ *     static constexpr size_t size = sizeof(MyPacket);
+ *     
+ *     // 可选：定义位流布局
+ *     using BitLayout = std::tuple<
+ *         Field<uint8_t, 3>,
+ *         Field<int16_t, 16, 8>
+ *     >;
+ * };
+ * @endcode
  */
 template <typename T> struct PacketTraits;
 } // namespace RPL::Meta
@@ -417,11 +576,14 @@ namespace RPL::Detail {
  * 由于 BitOffset 和 BitWidth 是编译时常量，编译器会将此优化
  * 为高效的位操作。
  *
- * @tparam T 返回类型 (整数)
+ * @tparam T 返回类型 (整数或 std::array)
  * @tparam BitOffset 起始位索引 (0 是第一个字节的 LSB)
  * @tparam BitWidth 要提取的位数
  * @param buffer 要读取的字节序列
  * @return 提取的值并转换为类型 T
+ *
+ * @note 此函数是位流解析的核心，支持跨越字节边界的位提取
+ * @warning 如果 BitWidth 超过 T 的容量，将触发 static_assert
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr T extract_bits(std::span<const uint8_t> buffer) {
@@ -480,6 +642,14 @@ constexpr T extract_bits(std::span<const uint8_t> buffer) {
 
 /**
  * @brief 将位流布局解析为元组的核心实现
+ *
+ * 根据编译期的位布局定义，从字节缓冲区中提取所有位域并返回元组。
+ * 使用前缀和算法在编译期计算每个字段的位偏移。
+ *
+ * @tparam Layout 位布局定义（元组 Field 类型）
+ * @tparam Is 索引序列（用于展开折叠表达式）
+ * @param buffer 包含线格式数据的字节序列
+ * @return 包含所有提取值的元组
  */
 template <typename Layout, std::size_t... Is>
 constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_sequence<Is...>) {
@@ -503,12 +673,24 @@ constexpr auto parse_bitstream_impl(std::span<const uint8_t> buffer, std::index_
 
 /**
  * @brief 辅助函数：将单个元素包装成 tuple，如果是 std::array 则展开
+ *
+ * @tparam T 元素类型
+ * @param val 要包装的值
+ * @return 包含元素的 tuple，如果是 std::array 则展开为多个元素
  */
 template <typename T>
 constexpr auto flatten_element(T&& val) {
     return std::make_tuple(std::forward<T>(val));
 }
 
+/**
+ * @brief 辅助函数：将 std::array 元素展开为 tuple
+ *
+ * @tparam T 数组元素类型
+ * @tparam N 数组大小
+ * @param arr 要展开的数组
+ * @return 包含数组所有元素的 tuple
+ */
 template <typename T, std::size_t N>
 constexpr auto flatten_element(const std::array<T, N>& arr) {
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -518,8 +700,13 @@ constexpr auto flatten_element(const std::array<T, N>& arr) {
 
 /**
  * @brief 将包含 std::array 的 tuple 打平为全标量 tuple
- * 
- * 这样可以利用 C++20 的大括号省略特性初始化含有 C 数组的结构体
+ *
+ * 这样可以利用 C++20 的大括号省略特性初始化含有 C 数组的结构体。
+ * 例如，tuple<int, std::array<float, 3>> 会被打平为 tuple<int, float, float, float>。
+ *
+ * @tparam Ts 元组元素类型
+ * @param t 要打平的元组
+ * @return 打平后的元组（所有 std::array 被展开）
  */
 template <typename... Ts>
 constexpr auto flatten_tuple(const std::tuple<Ts...>& t) {
@@ -535,12 +722,26 @@ namespace RPL {
 /**
  * @brief 使用位流布局定义反序列化数据包
  *
- * 从缓冲区中提取位域并安全地构造目标结构 T
- * 使用 C++20 括号聚合初始化。
+ * 从缓冲区中提取位域并安全地构造目标结构 T。
+ * 使用 C++20 括号聚合初始化，支持含有 C 数组的结构体。
  *
- * @tparam T 目标结构类型
+ * @tparam T 目标结构类型（必须有 BitLayout 特化）
  * @param buffer 包含线格式数据的字节序列
  * @return 正确初始化位域的结构
+ *
+ * @par 使用示例
+ * @code
+ * struct MyPacket {
+ *     uint8_t flags;
+ *     int16_t channels[8];
+ * };
+ * 
+ * // 在 PacketTraits 特化中定义 BitLayout...
+ * 
+ * auto packet = RPL::deserialize_bitstream<MyPacket>(buffer);
+ * @endcode
+ *
+ * @note 此函数要求 Meta::HasBitLayout<Meta::PacketTraits<T>> 为 true
  */
 template <typename T>
 requires Meta::HasBitLayout<Meta::PacketTraits<T>>
@@ -548,16 +749,14 @@ constexpr T deserialize_bitstream(std::span<const uint8_t> buffer) {
     using Layout = typename Meta::PacketTraits<T>::BitLayout;
     constexpr std::size_t N = std::tuple_size_v<Layout>;
 
-    // 1. 根据编译期布局将值提取到元组中 (可能包含 std::array)
+    // 1. 根据编译期布局将值提取到元组中 (如果是数组字段，这里就是一个 std::array)
     auto values_tuple = Detail::parse_bitstream_impl<Layout>(
         buffer, std::make_index_sequence<N>{}
     );
 
-    // 2. 打平元组以支持 C 风格数组的聚合初始化
-    auto flat_tuple = Detail::flatten_tuple(values_tuple);
-
-    // 3. 使用 C++20 聚合初始化赋值
-    return std::make_from_tuple<T>(flat_tuple);
+    // 2. 直接使用 C++20 聚合初始化赋值
+    // 如果 T 的成员是 std::array，它能完美接收元组中的 std::array 元素
+    return std::make_from_tuple<T>(values_tuple);
 }
 
 } // namespace RPL
@@ -568,6 +767,14 @@ constexpr T deserialize_bitstream(std::span<const uint8_t> buffer) {
  *
  * 此文件定义了数据包信息收集器，用于管理数据包的元信息，
  * 包括总大小、命令码到索引的映射等。
+ *
+ * PacketInfoCollector 在编译期计算所有数据包的内存布局，
+ * 考虑对齐要求，并生成高效的查找表（使用 frozen 库）。
+ *
+ * @par 设计原理
+ * - 使用编译期计算避免运行时开销
+ * - 考虑内存对齐以确保安全访问
+ * - 使用 frozen::unordered_map 提供高效的编译期查找表
  *
  * @author WindWeaver
  */
@@ -1659,6 +1866,12 @@ constexpr auto make_unordered_map(
 namespace RPL::Meta {
 /**
  * @brief 编译期对齐计算辅助函数
+ *
+ * 将 offset 向上对齐到 alignment 的倍数。
+ *
+ * @param offset 当前偏移量
+ * @param alignment 对齐要求（必须是 2 的幂）
+ * @return 对齐后的偏移量
  */
 constexpr size_t align_up(size_t offset, size_t alignment) {
   return (offset + alignment - 1) & ~(alignment - 1);
@@ -1667,13 +1880,33 @@ constexpr size_t align_up(size_t offset, size_t alignment) {
 /**
  * @brief 数据包信息收集器
  *
- * 用于收集和管理数据包的元信息，包括总大小、命令码到索引的映射等
+ * 用于收集和管理数据包的元信息，包括总大小、命令码到索引的映射等。
+ * 所有计算都在编译期完成，运行时零开销。
  *
  * @tparam Ts 数据包类型列表
+ *
+ * @par 主要功能
+ * - 计算所有数据包在内存池中的布局（考虑对齐）
+ * - 生成命令码到内存偏移量的映射表
+ * - 生成命令码到序列索引的映射表（用于 SeqLock）
+ *
+ * @code
+ * using Collector = RPL::Meta::PacketInfoCollector<PacketA, PacketB>;
+ * constexpr size_t total_size = Collector::totalSize;
+ * constexpr size_t offset = Collector::cmd_index(0x0102);
+ * @endcode
  */
 template <typename... Ts> struct PacketInfoCollector {
   /**
    * @brief 递归计算偏移量的辅助函数
+   *
+   * 遍历所有类型，计算每个类型在内存池中的对齐后偏移量。
+   *
+   * @tparam T 当前处理的类型
+   * @tparam Rest 剩余类型列表
+   * @param offsets 存储所有偏移量的数组
+   * @param current_offset 当前偏移量（会更新）
+   * @param index 当前类型的索引
    */
   template <typename T, typename... Rest>
   static constexpr void calculate_offsets(
@@ -1690,6 +1923,9 @@ template <typename... Ts> struct PacketInfoCollector {
 
   /**
    * @brief 计算所有数据包在内存池中的布局（考虑对齐）
+   *
+   * 此静态常量在编译期计算所有数据包的内存布局，
+   * 包括每个数据包的偏移量和总大小。
    */
   static constexpr auto layout = []() {
     struct LayoutInfo {
@@ -1710,7 +1946,8 @@ template <typename... Ts> struct PacketInfoCollector {
   /**
    * @brief 命令码到索引的映射
    *
-   * 静态常量映射，将命令码映射到在内存池中的偏移量
+   * 静态常量映射，将命令码映射到在内存池中的偏移量。
+   * 使用 frozen::unordered_map 实现编译期查找表。
    */
   static constexpr auto cmdToIndex = []() {
     std::array<std::pair<uint16_t, size_t>, sizeof...(Ts)> pairs{};
@@ -1752,6 +1989,9 @@ template <typename... Ts> struct PacketInfoCollector {
 
   /**
    * @brief 命令码到序列索引的映射（0-based 类型序号，用于 SeqLock version 数组）
+   *
+   * 此映射将命令码映射到其在模板参数列表中的序号（0, 1, 2, ...）。
+   * 用于 SeqLock 机制中定位对应的 version 计数器。
    */
   static constexpr auto cmdToSeqIndex = []() {
     std::array<std::pair<uint16_t, size_t>, sizeof...(Ts)> pairs{};
@@ -1761,18 +2001,61 @@ template <typename... Ts> struct PacketInfoCollector {
     return frozen::make_unordered_map(pairs);
   }();
 
+  /**
+   * @brief 根据命令码获取序列索引
+   *
+   * @param cmd 命令码
+   * @return 对应的序列索引（0-based 类型序号），如果命令码不存在则返回-1
+   */
   static constexpr size_t cmd_seq_index(uint16_t cmd) noexcept {
     auto it = cmdToSeqIndex.find(cmd);
     return it != cmdToSeqIndex.end() ? it->second : static_cast<size_t>(-1);
   }
 
+  /**
+   * @brief 获取指定类型的序列索引
+   *
+   * @tparam T 数据包类型
+   * @return 该类型的序列索引（0-based 类型序号）
+   */
   template <typename T> static constexpr size_t type_seq_index() noexcept {
     return cmd_seq_index(PacketTraits<T>::cmd);
   }
 };
 } // namespace RPL::Meta
 
+/**
+ * @file CompilerBarrier.hpp
+ * @brief RPL 编译器屏障实现
+ *
+ * 此文件提供编译器屏障（Compiler Barrier）功能，
+ * 用于阻止编译器对内存访问指令进行重排序优化。
+ *
+ * @par 设计原理
+ * - 编译器屏障是一种内存屏障的轻量级形式
+ * - 它告诉编译器不要跨越屏障重排内存访问
+ * - 与硬件内存屏障不同，它不生成任何CPU指令
+ *
+ * @par 使用场景
+ * - SeqLock 实现中的读写同步
+ * - 无锁数据结构
+ * - 禁用异常环境中的内存 ordering
+ *
+ * @author WindWeaver
+ */
+
 namespace RPL {
+
+/**
+ * @brief 编译器屏障函数
+ *
+ * 阻止编译器对跨越此屏障的内存访问进行重排序优化。
+ * 这是一个轻量级的软件屏障，不生成任何 CPU 指令。
+ *
+ * @note 在 GCC/Clang 上使用 inline asm，在 MSVC 上使用 _ReadWriteBarrier
+ * @warning 此函数仅提供编译器级别的屏障，不提供硬件级别的内存排序保证
+ *          在需要更强保证的场景中，应使用 std::atomic 或硬件屏障
+ */
 #ifndef compiler_barrier
 inline void compiler_barrier() noexcept {
 #if defined(_MSC_VER)
@@ -1781,17 +2064,25 @@ inline void compiler_barrier() noexcept {
   asm volatile("" ::: "memory");
 #endif
 }
-// namespace RPL
 #endif
+
 } // namespace RPL
+
 #ifdef RPL_USE_STD_ATOMIC
 #endif
 
+/**
+ * @namespace RPL
+ * @brief RoboMaster Packet Library 的主命名空间
+ *
+ * RPL 是一个专为嵌入式高性能通信设计的 C++20 数据包序列化/反序列化库。
+ */
 namespace RPL {
 /**
  * @brief 可反序列化概念
  *
- * 用于检查类型T是否为可反序列化类型之一
+ * 用于检查类型 T 是否为可反序列化类型之一。
+ * 此概念用于模板约束，确保只有注册的数据包类型可以被反序列化。
  *
  * @tparam T 要检查的类型
  * @tparam Ts 可反序列化类型列表
@@ -1802,25 +2093,51 @@ concept Deserializable = (std::is_same_v<T, Ts> || ...);
 /**
  * @brief 反序列化器类
  *
- * 用于从字节数组中反序列化数据包结构，使用内存池来存储反序列化的数据
+ * 用于从字节数组中反序列化数据包结构，使用内存池来存储反序列化的数据。
+ * 支持 SeqLock 机制以实现线程安全的读取。
  *
  * @tparam Ts 可反序列化的数据包类型列表
+ *
+ * @par 设计原理
+ * - 使用静态内存池避免动态分配
+ * - SeqLock 机制保证读取一致性
+ * - 支持分段写入（用于 BipBuffer 边界跨越场景）
+ *
+ * @par 使用示例
+ * @code
+ * RPL::Deserializer<PacketA, PacketB> deserializer;
+ * 
+ * // Parser 内部调用 write() 写入数据
+ * deserializer.write(PacketA::cmd, data_ptr, sizeof(PacketA));
+ * 
+ * // 用户获取数据包
+ * auto packet_a = deserializer.get<PacketA>();
+ * @endcode
  */
 template <typename... Ts> class Deserializer {
   using Collector = Meta::PacketInfoCollector<Ts...>; ///< 用于收集包信息的类型
   Containers::MemoryPool<Collector> pool{}; ///< 存储反序列化数据的内存池
 
 #ifdef RPL_USE_STD_ATOMIC
-  std::atomic<uint32_t> versions_[sizeof...(Ts)]{}; ///< SeqLock version counters
+  /// @brief SeqLock version counters（原子版本）
+  std::atomic<uint32_t> versions_[sizeof...(Ts)]{};
 #else
-  volatile uint32_t versions_[sizeof...(Ts)]{}; ///< SeqLock version counters
+  /// @brief SeqLock version counters（volatile + compiler barrier 版本）
+  volatile uint32_t versions_[sizeof...(Ts)]{};
 #endif
 
 public:
   /**
    * @brief SeqLock 写入方法
    *
-   * 供 Parser 调用，写入前后递增 version（odd=writing, even=done）
+   * 供 Parser 调用，写入前后递增 version（odd=writing, even=done）。
+   * 使用 SeqLock 机制确保读取器在读取时不会获得不一致的数据。
+   *
+   * @par SeqLock 工作原理
+   * - 写入前：version++（变为奇数，表示正在写入）
+   * - 写入数据
+   * - 写入后：version++（变为偶数，表示写入完成）
+   * - 读取器：检查 version 是否为偶数且前后一致
    *
    * @param cmd 命令码
    * @param src 数据源指针
@@ -1854,10 +2171,13 @@ public:
    * @brief 分段 SeqLock 写入方法
    *
    * 用于处理跨越 BipBuffer 边界的数据包，避免中间拷贝。
+   * 当数据跨越缓冲区 A/B 区域边界时，数据会被分为两个 span。
    *
    * @param cmd 命令码
-   * @param s1 第一段数据
-   * @param s2 第二段数据
+   * @param s1 第一段数据（可能为空）
+   * @param s2 第二段数据（可能为空）
+   *
+   * @note 此方法用于零拷贝场景，直接从 BipBuffer 的分段视图写入
    */
   void write_segmented(uint16_t cmd, std::span<const uint8_t> s1,
                        std::span<const uint8_t> s2) noexcept {
@@ -1893,10 +2213,19 @@ public:
    * @brief 获取指定类型的数据包（SeqLock 读循环）
    *
    * 从内存池中获取指定类型的反序列化数据包，
-   * 通过 SeqLock 保证读取一致性
+   * 通过 SeqLock 保证读取一致性。
+   *
+   * @par 读取流程
+   * 1. 读取 version（必须为偶数）
+   * 2. 复制数据
+   * 3. 再次读取 version
+   * 4. 如果 version 改变或为奇数，重试
    *
    * @tparam T 要获取的数据包类型
    * @return 指定类型的反序列化数据包
+   *
+   * @note 此方法是线程安全的（与 write() 并发调用时）
+   * @note 如果 RPL_USE_STD_ATOMIC 未定义，使用 volatile + compiler barrier
    */
   template <typename T>
     requires Deserializable<T, Ts...>
@@ -1936,11 +2265,14 @@ public:
   /**
    * @brief 获取指定类型的直接引用
    *
-   * 获取内存池中指定类型的直接引用
+   * 获取内存池中指定类型的直接引用，无拷贝。
    *
-   * @warning 存在竞态访问可能
+   * @warning 存在竞态访问可能，不保证读取一致性
+   * @warning 仅在对性能有极致要求且能确保无并发写入时使用
    * @tparam T 要获取引用的数据包类型
    * @return 指定类型的直接引用
+   *
+   * @note 此方法跳过 SeqLock 检查，速度更快但不安全
    */
   template <typename T>
     requires Deserializable<T, Ts...>
@@ -1955,6 +2287,8 @@ public:
    * @deprecated 请改用 write() 方法以获得 SeqLock 线程安全保护
    * @param cmd 命令码
    * @return 指向数据缓冲区的指针，如果命令码无效则返回nullptr
+   *
+   * @warning 此方法不提供 SeqLock 保护，存在竞态风险
    */
   [[deprecated("Use write() for SeqLock-protected writes")]]
   [[nodiscard]] constexpr uint8_t *getWritePtr(uint16_t cmd) noexcept {
@@ -1976,6 +2310,25 @@ public:
  * @author WindWeaver
  */
 
+/**
+ * @file BitstreamSerializer.hpp
+ * @brief RPL 位流序列化器实现
+ *
+ * 此文件提供位流序列化功能，可以将结构体数据打包为紧凑的位流字节序列。
+ * 支持跨字节位注入、编译期优化和 C 数组到 std::array 的自动转换。
+ *
+ * @par 设计原理
+ * - 使用编译期位偏移计算，运行时仅执行高效的位操作
+ * - 支持小端线格式 (little-endian wire format) 的位注入
+ * - 通过结构化绑定 (C++17) 自动解包结构体成员
+ *
+ * @par 使用场景
+ * - 紧凑位域协议的序列化（如遥控器协议）
+ * - 需要节省带宽的嵌入式通信
+ *
+ * @author WindWeaver
+ */
+
 namespace RPL::Detail {
 
 /**
@@ -1984,6 +2337,16 @@ namespace RPL::Detail {
  * 此函数处理跨字节位注入，采用小端线格式假设。
  * 由于 BitOffset 和 BitWidth 是编译时常量，编译器会将此优化
  * 为高效的位操作。
+ *
+ * @tparam T 值类型 (整数或 std::array)
+ * @tparam BitOffset 起始位索引 (0 是第一个字节的 LSB)
+ * @tparam BitWidth 要注入的位数
+ * @param buffer 要写入的字节序列
+ * @param value 要注入的值
+ *
+ * @note 此函数是位流序列化的核心，支持跨越字节边界的位注入
+ * @warning 如果 BitWidth 超过 T 的容量，将触发 static_assert
+ * @note 此函数采用 OR 操作注入位，缓冲区应预先清零
  */
 template <typename T, std::size_t BitOffset, std::size_t BitWidth>
 constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
@@ -2035,6 +2398,13 @@ constexpr void inject_bits(std::span<uint8_t> buffer, T value) {
 
 /**
  * @brief 辅助函数：如果是 C 数组则转换为 std::array，否则保持原样
+ *
+ * 用于处理结构化绑定中解包出的 C 数组成员，将其转换为 std::array
+ * 以便后续位注入操作。
+ *
+ * @tparam T 值类型
+ * @param val 要转换的值
+ * @return 如果是 C 数组则返回 std::array，否则返回转发后的值
  */
 template <typename T> constexpr auto to_array_if_needed(T &&val) {
   if constexpr (std::is_array_v<std::remove_cvref_t<T>>) {
@@ -2051,6 +2421,17 @@ template <typename T> constexpr auto to_array_if_needed(T &&val) {
 
 /**
  * @brief 使用结构化绑定将结构体解包为成员元组
+ *
+ * 此函数利用 C++17 的结构化绑定特性，将结构体的每个成员提取出来
+ * 并打包为元组。对于 C 数组成员，会自动转换为 std::array。
+ *
+ * @note 此函数支持 1 到 64 个成员的结构体
+ * @warning 如果结构体成员超过 64 个，需要添加更多分支或使用其他方法
+ *
+ * @tparam N 结构体成员数量
+ * @tparam T 结构体类型
+ * @param obj 要解包的结构体对象
+ * @return 包含所有成员的元组（C 数组已转换为 std::array）
  */
 template <std::size_t N, typename T> constexpr auto struct_to_tuple(const T &obj) {
   if constexpr (N == 1) { const auto [m1] = obj; return std::make_tuple(to_array_if_needed(m1)); }
@@ -2082,7 +2463,7 @@ template <std::size_t N, typename T> constexpr auto struct_to_tuple(const T &obj
   else if constexpr (N == 27) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27)); }
   else if constexpr (N == 28) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28)); }
   else if constexpr (N == 29) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29)); }
-  else if constexpr (N == 30) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), house_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30)); }
+  else if constexpr (N == 30) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30)); }
   else if constexpr (N == 31) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31)); }
   else if constexpr (N == 32) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32)); }
   else if constexpr (N == 33) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33)); }
@@ -2114,7 +2495,7 @@ template <std::size_t N, typename T> constexpr auto struct_to_tuple(const T &obj
   else if constexpr (N == 59) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59)); }
   else if constexpr (N == 60) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60)); }
   else if constexpr (N == 61) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61)); }
-  else if constexpr (N == 62) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61, m62] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), Fade_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61), to_array_if_needed(m62)); }
+  else if constexpr (N == 62) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61, m62] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61), to_array_if_needed(m62)); }
   else if constexpr (N == 63) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61, m62, m63] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61), to_array_if_needed(m62), to_array_if_needed(m63)); }
   else if constexpr (N == 64) { const auto [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, m31, m32, m33, m34, m35, m36, m37, m38, m39, m40, m41, m42, m43, m44, m45, m46, m47, m48, m49, m50, m51, m52, m53, m54, m55, m56, m57, m58, m59, m60, m61, m62, m63, m64] = obj; return std::make_tuple(to_array_if_needed(m1), to_array_if_needed(m2), to_array_if_needed(m3), to_array_if_needed(m4), to_array_if_needed(m5), to_array_if_needed(m6), to_array_if_needed(m7), to_array_if_needed(m8), to_array_if_needed(m9), to_array_if_needed(m10), to_array_if_needed(m11), to_array_if_needed(m12), to_array_if_needed(m13), to_array_if_needed(m14), to_array_if_needed(m15), to_array_if_needed(m16), to_array_if_needed(m17), to_array_if_needed(m18), to_array_if_needed(m19), to_array_if_needed(m20), to_array_if_needed(m21), to_array_if_needed(m22), to_array_if_needed(m23), to_array_if_needed(m24), to_array_if_needed(m25), to_array_if_needed(m26), to_array_if_needed(m27), to_array_if_needed(m28), to_array_if_needed(m29), to_array_if_needed(m30), to_array_if_needed(m31), to_array_if_needed(m32), to_array_if_needed(m33), to_array_if_needed(m34), to_array_if_needed(m35), to_array_if_needed(m36), to_array_if_needed(m37), to_array_if_needed(m38), to_array_if_needed(m39), to_array_if_needed(m40), to_array_if_needed(m41), to_array_if_needed(m42), to_array_if_needed(m43), to_array_if_needed(m44), to_array_if_needed(m45), to_array_if_needed(m46), to_array_if_needed(m47), to_array_if_needed(m48), to_array_if_needed(m49), to_array_if_needed(m50), to_array_if_needed(m51), to_array_if_needed(m52), to_array_if_needed(m53), to_array_if_needed(m54), to_array_if_needed(m55), to_array_if_needed(m56), to_array_if_needed(m57), to_array_if_needed(m58), to_array_if_needed(m59), to_array_if_needed(m60), to_array_if_needed(m61), to_array_if_needed(m62), to_array_if_needed(m63), to_array_if_needed(m64)); }
   else {
@@ -2133,6 +2514,20 @@ namespace RPL {
  *
  * 使用结构化绑定从结构中提取位域并注入
  * 到字节序列中正确的编译期偏移处。
+ *
+ * @tparam T 目标结构类型（必须有 BitLayout 特化）
+ * @param buffer 要写入的字节序列（应预先清零）
+ * @param packet 要序列化的数据包对象
+ *
+ * @par 使用示例
+ * @code
+ * MyPacket packet{...};
+ * std::array<uint8_t, 16> buffer{}; // 初始化为 0
+ * RPL::serialize_bitstream(buffer, packet);
+ * @endcode
+ *
+ * @warning 缓冲区应预先清零，因为此函数使用 OR 操作注入位
+ * @note 此函数要求 Meta::HasBitLayout<Meta::PacketTraits<T>> 为 true
  */
 template <typename T>
   requires Meta::HasBitLayout<Meta::PacketTraits<T>>
@@ -4681,11 +5076,16 @@ void swap(expected<T, E> &lhs,
 }
 } // namespace tl
 
+/**
+ * @namespace RPL
+ * @brief RoboMaster Packet Library 的主命名空间
+ */
 namespace RPL {
 /**
  * @brief 可序列化概念
  *
- * 用于检查类型T是否为可序列化类型之一
+ * 用于检查类型 T 是否为可序列化类型之一。
+ * 此概念使用 std::decay_t 来忽略引用/const 限定符。
  *
  * @tparam T 要检查的类型
  * @tparam Ts 可序列化类型列表
@@ -4696,22 +5096,47 @@ concept Serializable = (std::is_same_v<std::decay_t<T>, Ts> || ...);
 /**
  * @brief 序列化器类
  *
- * 用于将数据包结构序列化为字节数组，包含帧头、命令码、数据长度、序列号和CRC校验
+ * 用于将数据包结构序列化为字节数组，包含帧头、命令码、数据长度、序列号和CRC校验。
  *
  * @tparam Ts 可序列化的数据包类型列表
+ *
+ * @par 使用示例
+ * @code
+ * RPL::Serializer<PacketA, PacketB> serializer;
+ * 
+ * std::array<uint8_t, 128> buffer;
+ * PacketA pkt_a{...};
+ * PacketB pkt_b{...};
+ * 
+ * auto result = serializer.serialize(buffer.data(), buffer.size(), pkt_a, pkt_b);
+ * if (result) {
+ *     // 发送 result.value() 字节的序列化数据
+ *     uart_send(buffer.data(), *result);
+ * }
+ * @endcode
+ *
+ * @par 序列化格式
+ * 根据 Protocol 定义，每个帧包含：
+ * - 帧头（起始字节、长度、序列号、Header CRC8）
+ * - 数据负载（命令码 + 数据）
+ * - 帧尾（Frame CRC16）
  */
 template <typename... Ts> class Serializer {
 public:
   /**
    * @brief 将数据包序列化到用户提供的缓冲区
    *
-   * 将多个数据包序列化为字节数组，每个数据包包含帧头、数据和帧尾
+   * 将多个数据包序列化为字节数组，每个数据包包含帧头、数据和帧尾。
+   * 序列号会在每次序列化后自动递增。
    *
    * @tparam Packets 要序列化的数据包类型列表
    * @param buffer 用户提供的输出缓冲区
    * @param size 缓冲区大小
    * @param packets 要序列化的数据包
    * @return 序列化成功时返回写入的字节数，失败时返回错误信息
+   *
+   * @note 数据包按参数顺序序列化，每个数据包独立成帧
+   * @warning 缓冲区大小必须足够容纳所有数据包的帧
    */
   template <typename... Packets>
     requires(Serializable<Packets, Ts...> && ...)
@@ -4818,7 +5243,7 @@ public:
   /**
    * @brief 计算指定类型的完整帧大小
    *
-   * 计算包含帧头、数据和帧尾的完整帧大小
+   * 计算包含帧头、数据和帧尾的完整帧大小。
    *
    * @tparam T 数据包类型
    * @return 完整帧大小（字节）
@@ -4835,7 +5260,7 @@ public:
   /**
    * @brief 计算指定命令码的完整帧大小
    *
-   * 根据命令码计算对应的完整帧大小
+   * 根据命令码计算对应的完整帧大小。
    *
    * @param cmd 命令码
    * @return 对应的完整帧大小（字节），如果命令码无效则返回0
@@ -4850,7 +5275,7 @@ public:
   /**
    * @brief 获取最大帧大小
    *
-   * 获取所有可序列化类型中的最大帧大小
+   * 获取所有可序列化类型中的最大帧大小，用于预分配缓冲区。
    *
    * @return 最大帧大小（字节）
    */
@@ -4861,7 +5286,7 @@ public:
   /**
    * @brief 检查命令码是否有效
    *
-   * 检查给定的命令码是否对应于任何可序列化类型
+   * 检查给定的命令码是否对应于任何可序列化类型。
    *
    * @param cmd 要检查的命令码
    * @return 如果命令码有效返回true，否则返回false
@@ -4873,10 +5298,10 @@ public:
   /**
    * @brief 通过命令码获取对应的类型索引
    *
-   * 获取与指定命令码关联的类型在模板参数列表中的索引（用于调试）
+   * 获取与指定命令码关联的类型在模板参数列表中的索引（用于调试）。
    *
    * @param cmd 命令码
-   * @return 类型索引，如果命令码无效则返回SIZE_MAX
+   * @return 类型索引，如果命令码无效则返回 SIZE_MAX
    */
   static constexpr size_t get_type_index_by_cmd(uint16_t cmd) noexcept {
     size_t index = 0;
@@ -4913,7 +5338,8 @@ public:
   /**
    * @brief 获取当前序列号
    *
-   * 获取当前的序列号值
+   * 获取当前的序列号值。
+   * 序列号在每次成功序列化后自动递增。
    *
    * @return 当前序列号
    */
@@ -4939,6 +5365,36 @@ public:
  * 实现一个双区环形缓冲区 (BipBuffer)，保证连续内存访问。
  * 它维护两个区域 (A 和 B)，通过在缓冲区起始处开启新区域来处理
  * 回绕 (wrap-around) 情况，避免数据分裂。
+ *
+ * BipBuffer 是一种特殊的环形缓冲区，它保证任何可读数据块在物理内存中
+ * 是连续的。这使得解析器可以直接读取数据而无需处理回绕情况。
+ *
+ * @par 设计原理
+ * - 区域 A: FIFO 的头部（最先读取的数据）
+ * - 区域 B: FIFO 的尾部（在 A 之后读取的数据），起始位置始终为 0
+ * - 写入时自动选择合适区域，避免数据跨越缓冲区边界
+ *
+ * @par 使用场景
+ * - 流式数据包解析（如 Parser 类）
+ * - DMA 直接内存访问的零拷贝写入
+ * - 需要连续内存块的协议解析
+ *
+ * @code
+ * RPL::Containers::BipBuffer<1024> buffer;
+ *
+ * // 获取写入缓冲区
+ * auto write_span = buffer.get_write_buffer();
+ * // DMA 或手动写入数据...
+ * buffer.advance_write_index(received_bytes);
+ *
+ * // 读取数据
+ * auto read_span = buffer.get_contiguous_read_buffer();
+ * // 处理数据...
+ * buffer.discard(processed_bytes);
+ * @endcode
+ *
+ * @author WindWeaver
+ * @date 2024
  */
 
 namespace RPL::Containers {
@@ -4970,6 +5426,9 @@ public:
    *
    * 返回可用于写入的最大连续块。
    * 如果尾部空间不足，这可能会切换到缓冲区起始处。
+   *
+   * @return 可写入的连续内存 span，如果缓冲区已满则返回空 span
+   * @note 此方法支持零拷贝 DMA 写入
    */
   std::span<uint8_t> get_write_buffer() noexcept {
     // 情况 1: 区域 B 中有数据。只能追加到 B。
@@ -5008,8 +5467,13 @@ public:
   /**
    * @brief 预留空间/提交写入
    *
+   * 在数据写入缓冲区后调用此方法，以提交已写入的字节数。
+   * 此方法会根据当前写入区域（A 或 B）更新相应的状态。
+   *
    * @param length 已写入的字节数
-   * @return true 如果成功
+   * @return true 如果成功提交
+   * @return false 如果提交长度超出可用空间
+   * @note 此方法应与 get_write_buffer() 或 get_write_buffer_force_wrap() 配合使用
    */
   bool advance_write_index(size_t length) {
     if (length == 0)
@@ -5058,7 +5522,9 @@ public:
    *
    * 强制缓冲区跳过尾部剩余空间，从 0 位置开始写入。
    * 当尾部剩余空间太小无法容纳 incoming 数据包时很有用。
-   * @return 缓冲区起始处的 Span (区域 B)
+   *
+   * @return 缓冲区起始处的 Span (区域 B)，如果无法切换则返回空 span
+   * @note 此方法用于处理特殊情况，通常应使用 get_write_buffer()
    */
   std::span<uint8_t> get_write_buffer_force_wrap() {
     if (region_b_size > 0) {
@@ -5088,6 +5554,15 @@ public:
 
   /**
    * @brief 复制数据到缓冲区
+   *
+   * 将数据拷贝到内部缓冲区，自动选择合适的写入区域。
+   * 如果当前区域空间不足，会尝试切换到另一区域。
+   *
+   * @param data 指向源数据的指针
+   * @param length 要写入的字节数
+   * @return true 如果成功写入
+   * @return false 如果没有足够的连续空间
+   * @note 此方法会执行内存拷贝，对于零拷贝场景请使用 get_write_buffer()
    */
   bool write(const uint8_t *data, size_t length) {
     if (length == 0)
@@ -5118,6 +5593,11 @@ public:
 
   /**
    * @brief 获取连续数据用于读取
+   *
+   * 返回当前可用的第一个连续数据块（区域 A 的内容）。
+   * 读取并处理完数据后，应调用 discard() 来释放空间。
+   *
+   * @return 可读的连续内存 span，如果没有数据则返回空 span
    */
   [[nodiscard]] std::span<const uint8_t>
   get_contiguous_read_buffer() const noexcept {
@@ -5129,7 +5609,13 @@ public:
 
   /**
    * @brief 丢弃数据 (推进读取索引)
-   * 支持跨区域丢弃
+   *
+   * 从缓冲区中移除已处理的数据，释放空间供后续写入使用。
+   * 支持跨区域丢弃（同时丢弃区域 A 和 B 的数据）。
+   *
+   * @param length 要丢弃的字节数
+   * @return true 如果成功丢弃
+   * @return false 如果请求长度超过可用数据量
    */
   bool discard(size_t length) {
     if (length == 0)
@@ -5170,9 +5656,14 @@ public:
   /**
    * @brief 获取两个连续的读视图 (用于零拷贝分段处理)
    *
-   * @param offset 相对于 available 数据的偏移量
-   * @param length 长度
+   * 返回指定偏移量和长度的数据视图，可能分为两个连续的 span。
+   * 如果数据是连续的，第二个 span 为空。
+   *
+   * @param offset 相对于可用数据的偏移量
+   * @param length 要读取的长度
    * @return std::pair 包含两个 span。如果数据是连续的，第二个 span 为空。
+   *         如果请求超出范围，两个 span 都为空。
+   * @note 此方法用于零拷贝 CRC 校验等场景
    */
   [[nodiscard]] std::pair<std::span<const uint8_t>, std::span<const uint8_t>>
   get_read_spans(size_t offset, size_t length) const noexcept {
@@ -5195,11 +5686,22 @@ public:
     }
   }
 
-  // 便捷方法
+  // --- 便捷方法 ---
+  
+  /**
+   * @brief 获取可用数据字节数
+   * @return 当前缓冲区中可读数据的总字节数
+   */
   size_t available() const { return region_a_size + region_b_size; }
 
-  // 空间计算很棘手:
-  // 它是 max(A 尾部空间, A 起始前空间) - 但逻辑取决于状态。大约:
+  /**
+   * @brief 获取可用写入空间
+   *
+   * 注意：这是总空闲字节数，不一定是连续的。
+   * 实际可写入的连续空间可能小于此值。
+   *
+   * @return 总空闲字节数
+   */
   size_t space() const {
     if (region_b_size > 0)
       return region_a_start - region_b_size;
@@ -5208,18 +5710,44 @@ public:
     return (SIZE - (region_a_start + region_a_size)) + region_a_start;
   }
 
+  /**
+   * @brief 检查缓冲区是否已满
+   * @return true 如果没有可用写入空间
+   */
   bool full() const { return space() == 0; }
+  
+  /**
+   * @brief 检查缓冲区是否为空
+   * @return true 如果没有可读数据
+   */
   bool empty() const { return available() == 0; }
+  
+  /**
+   * @brief 清空缓冲区
+   * 重置所有状态，丢弃所有数据
+   */
   void clear() {
     region_a_start = region_a_size = 0;
     region_b_size = 0;
   }
 
+  /**
+   * @brief 获取缓冲区总容量
+   * @return 缓冲区的总大小（编译期常量）
+   */
   static constexpr size_t size() { return SIZE; }
 
   /**
-   * @brief 窥视 (必要时复制，但 BipBuffer 逻辑尽量避免)
-   * 注意: BipBuffer 的读取结构使得跨边界 'peek' 不复制很棘手。
+   * @brief 窥视缓冲区数据（不丢弃）
+   *
+   * 将数据从缓冲区复制到外部缓冲区，但不修改读取索引。
+   * 如果需要读取并丢弃数据，应使用 read() 方法。
+   *
+   * @param data 目标缓冲区指针
+   * @param offset 相对于可用数据的偏移量
+   * @param length 要读取的字节数
+   * @return true 如果成功读取
+   * @return false 如果请求超出可用范围
    */
   bool peek(uint8_t *data, size_t offset, size_t length) const {
     if (offset + length > available())
@@ -5242,6 +5770,17 @@ public:
     return true;
   }
 
+  /**
+   * @brief 读取并丢弃数据
+   *
+   * 将数据从缓冲区复制到外部缓冲区，并丢弃已读取的数据。
+   * 相当于 peek() 后调用 discard()。
+   *
+   * @param data 目标缓冲区指针
+   * @param length 要读取的字节数
+   * @return true 如果成功读取并丢弃
+   * @return false 如果请求超出可用范围
+   */
   bool read(uint8_t *data, size_t length) {
     if (!peek(data, 0, length))
       return false;
@@ -5254,10 +5793,21 @@ public:
 
 /**
  * @file ConnectionMonitor.hpp
- * @brief RPL库的连接健康检测工具
+ * @brief RPL 的连接健康检测工具
  *
  * 此文件提供连接监控策略类，用于检测通信链路是否正常工作。
  * 采用编译期策略模式，不需要监控时零开销。
+ *
+ * @par 设计原理
+ * - 使用策略模式（Strategy Pattern）实现零开销抽象
+ * - NullConnectionMonitor 在不需要监控时被完全优化掉
+ * - TickConnectionMonitor 支持基于时间戳的超时检测
+ * - CallbackConnectionMonitor 允许用户自定义回调逻辑
+ *
+ * @par 使用场景
+ * - 检测通信链路是否断开
+ * - 超时重连逻辑
+ * - 自定义数据包接收事件处理
  *
  * @author WindWeaver
  */
@@ -5267,7 +5817,10 @@ namespace RPL {
 /**
  * @brief 连接监控器概念
  *
- * 定义连接监控器必须满足的接口要求
+ * 定义连接监控器必须满足的接口要求。
+ * 任何连接监控器类型必须实现 on_packet_received() 方法。
+ *
+ * @tparam T 要检查的类型
  */
 template <typename T>
 concept ConnectionMonitorConcept = requires(T &monitor) {
@@ -5279,10 +5832,20 @@ concept ConnectionMonitorConcept = requires(T &monitor) {
  *
  * 当不需要连接监控功能时使用此策略。
  * 所有方法均为空实现，编译器会将其完全优化掉。
+ *
+ * @par 使用示例
+ * @code
+ * //  Parser 默认使用此监控器
+ * RPL::Parser<PacketA, PacketB> parser{deserializer};
+ * // 等同于:
+ * RPL::Parser<RPL::NullConnectionMonitor, PacketA, PacketB> parser{deserializer};
+ * @endcode
  */
 struct NullConnectionMonitor {
   /**
    * @brief 数据包接收通知 (空实现)
+   *
+   * 此方法为空操作，编译器会将其完全优化掉。
    */
   constexpr void on_packet_received() noexcept {}
 };
@@ -5293,7 +5856,10 @@ static_assert(ConnectionMonitorConcept<NullConnectionMonitor>,
 /**
  * @brief Tick 提供器概念
  *
- * 定义时间戳提供器必须满足的接口要求
+ * 定义时间戳提供器必须满足的接口要求。
+ * Tick 提供器必须定义 tick_type 类型和 now() 静态方法。
+ *
+ * @tparam T 要检查的类型
  */
 template <typename T>
 concept TickProviderConcept = requires {
@@ -5309,13 +5875,27 @@ concept TickProviderConcept = requires {
  *
  * @tparam TickProvider 时间戳提供器类型，需满足 TickProviderConcept
  *
+ * @par TickProvider 实现示例
  * @code
  * // STM32 HAL 示例
  * struct HALTickProvider {
  *     using tick_type = uint32_t;
  *     static tick_type now() { return HAL_GetTick(); }
  * };
+ * 
+ * // Linux 时间戳示例
+ * struct LinuxTickProvider {
+ *     using tick_type = uint64_t;
+ *     static tick_type now() { 
+ *         struct timespec ts;
+ *         clock_gettime(CLOCK_MONOTONIC, &ts);
+ *         return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+ *     }
+ * };
+ * @endcode
  *
+ * @par 使用示例
+ * @code
  * using Monitor = RPL::TickConnectionMonitor<HALTickProvider>;
  * RPL::Parser<Monitor, PacketA, PacketB> parser{deserializer};
  *
@@ -5327,19 +5907,20 @@ concept TickProviderConcept = requires {
  */
 template <TickProviderConcept TickProvider> class TickConnectionMonitor {
 public:
+  /// @brief 时间戳类型（由 TickProvider 定义）
   using tick_type = typename TickProvider::tick_type;
 
   /**
    * @brief 数据包接收通知
    *
-   * 由 Parser 在成功解析数据包后调用，更新最后接收时间戳
+   * 由 Parser 在成功解析数据包后调用，更新最后接收时间戳。
    */
   void on_packet_received() noexcept { last_tick_ = TickProvider::now(); }
 
   /**
    * @brief 检查连接是否活跃
    *
-   * @param timeout 超时阈值（单位由 TickProvider 决定）
+   * @param timeout 超时阈值（单位由 TickProvider 决定，通常为毫秒）
    * @return true 如果在超时时间内收到过数据包
    * @return false 如果超过超时时间未收到数据包
    */
@@ -5357,7 +5938,7 @@ public:
   /**
    * @brief 获取自最后接收以来经过的时间
    *
-   * @return 距离最后一次成功接收数据包经过的时间
+   * @return 距离最后一次成功接收数据包经过的时间（与 tick_type 同单位）
    */
   [[nodiscard]] tick_type get_elapsed() const noexcept {
     return TickProvider::now() - last_tick_;
@@ -5366,7 +5947,7 @@ public:
   /**
    * @brief 重置监控器状态
    *
-   * 将最后接收时间戳设为当前时间
+   * 将最后接收时间戳设为当前时间，相当于重新建立连接。
    */
   void reset() noexcept { last_tick_ = TickProvider::now(); }
 
@@ -5391,14 +5972,16 @@ static_assert(
  * 允许用户提供自定义的回调函数，在收到数据包时执行。
  * 回调函数在编译期指定，零运行时开销。
  *
- * @tparam Callback 静态回调函数类型
+ * @tparam Callback 静态回调函数类型（必须实现 on_packet() 静态方法）
  *
+ * @par 使用示例
  * @code
  * struct MyCallback {
  *     static void on_packet() {
  *         // 自定义逻辑：计数器++、设置标志位等
  *         packet_count++;
  *     }
+ *     static inline uint32_t packet_count = 0;
  * };
  *
  * using Monitor = RPL::CallbackConnectionMonitor<MyCallback>;
@@ -5408,19 +5991,38 @@ static_assert(
 template <typename Callback>
   requires requires { Callback::on_packet(); }
 struct CallbackConnectionMonitor {
+  /**
+   * @brief 数据包接收通知
+   *
+   * 调用用户提供的回调函数。
+   */
   constexpr void on_packet_received() noexcept { Callback::on_packet(); }
 };
 
 } // namespace RPL
 
+/**
+ * @namespace RPL
+ * @brief RoboMaster Packet Library 的主命名空间
+ */
 namespace RPL {
 
 extern void RPL_ERROR_START_BYTE_COLLISION();
 
 namespace Details {
 // --- 类型去重工具 ---
+
+/**
+ * @brief 类型列表
+ * @tparam Ts 类型列表
+ */
 template <typename... Ts> struct TypeList {};
 
+/**
+ * @brief 检查类型是否在列表中
+ * @tparam T 要查找的类型
+ * @tparam List 类型列表
+ */
 template <typename T, typename List> struct Contains;
 template <typename T, typename... Ts>
 struct Contains<T, TypeList<Ts...>> : std::disjunction<std::is_same<T, Ts>...> {
@@ -5441,13 +6043,32 @@ struct UniqueImpl<TypeList<H, Ts...>, TypeList<Os...>> {
 template <typename... Ts>
 using UniqueTypes_t = typename UniqueImpl<TypeList<Ts...>, TypeList<>>::type;
 
-// --- 运行时获取 Tuple 元素 ---
+/**
+ * @brief 运行时获取 Tuple 元素
+ *
+ * 根据索引在运行时选择 tuple 元素并调用函数。
+ * 用于在运行时根据协议索引分发到编译期生成的 Worker。
+ *
+ * @tparam Tuple Tuple 类型
+ * @tparam Fn 函数对象类型
+ * @param i 索引
+ * @param t Tuple 实例
+ * @param f 要调用的函数
+ */
 template <typename Tuple, typename Fn, size_t... Is>
 constexpr void tuple_switch(size_t i, Tuple &&t, Fn &&f,
                             std::index_sequence<Is...>) {
   ((i == Is ? f(std::get<Is>(t)) : void()), ...);
 }
 
+/**
+ * @brief 便捷函数：运行时获取 Tuple 元素
+ * @tparam Tuple Tuple 类型
+ * @tparam Fn 函数对象类型
+ * @param i 索引
+ * @param t Tuple 实例
+ * @param f 要调用的函数
+ */
 template <typename Tuple, typename Fn>
 constexpr void runtime_get(size_t i, Tuple &&t, Fn &&f) {
   tuple_switch(i, std::forward<Tuple>(t), std::forward<Fn>(f),
@@ -5456,14 +6077,21 @@ constexpr void runtime_get(size_t i, Tuple &&t, Fn &&f) {
 }
 
 // --- ConnectionMonitor 检测工具 ---
-// 检查类型是否有 PacketTraits 特化 (即是否是数据包类型)
+
+/**
+ * @brief 检查类型是否有 PacketTraits 特化 (即是否是数据包类型)
+ * @tparam T 要检查的类型
+ */
 template <typename T>
 concept IsPacketType = requires {
   { Meta::PacketTraits<T>::cmd } -> std::convertible_to<uint16_t>;
   { Meta::PacketTraits<T>::size } -> std::convertible_to<size_t>;
 };
 
-// 检查类型是否是 ConnectionMonitor (满足 concept 且不是 Packet)
+/**
+ * @brief 检查类型是否是 ConnectionMonitor (满足 concept 且不是 Packet)
+ * @tparam T 要检查的类型
+ */
 template <typename T>
 struct IsConnectionMonitor
     : std::bool_constant<ConnectionMonitorConcept<T> && !IsPacketType<T>> {};
@@ -5660,8 +6288,16 @@ template <typename... Args> class Parser {
   using DeserializerType =
       typename DeserializerFromPackets<typename Extracted::Packets>::type;
 
-  // 解析结果枚举
-  enum class ParseResult { Success, Failure, Incomplete };
+  /**
+   * @brief 解析结果枚举
+   *
+   * 表示单次解析尝试的结果状态。
+   */
+  enum class ParseResult { 
+    Success,    ///< 成功解析一个完整帧
+    Failure,    ///< 解析失败（校验错误等），需要丢弃数据并重试
+    Incomplete  ///< 数据不完整，需要等待更多数据
+  };
 
   // --- 成员变量 ---
   Containers::BipBuffer<buffer_size> buffer;
@@ -5687,6 +6323,16 @@ public:
     return monitor_;
   }
 
+  /**
+   * @brief 推送数据到解析器
+   *
+   * 将接收到的数据写入内部缓冲区，并尝试解析数据包。
+   * 解析成功后，数据会自动从缓冲区移除。
+   *
+   * @param data 指向输入数据的指针
+   * @param length 数据长度
+   * @return void 或错误（缓冲区溢出）
+   */
   tl::expected<void, Error> push_data(const uint8_t *data,
                                       const size_t length) {
     if (!buffer.write(data, length)) {
@@ -5696,10 +6342,27 @@ public:
     return try_parse_packets();
   }
 
+  /**
+   * @brief 获取写入缓冲区（零拷贝）
+   *
+   * 返回一段连续的可写内存区域，供 DMA 或其他零拷贝写入使用。
+   * 写入后必须调用 advance_write_index() 提交。
+   *
+   * @return 可写入的连续内存 span
+   */
   std::span<uint8_t> get_write_buffer() noexcept {
     return buffer.get_write_buffer();
   }
 
+  /**
+   * @brief 提交写入缓冲区的数据
+   *
+   * 在使用 get_write_buffer() 获取的缓冲区写入后调用此方法。
+   * 提交后会尝试解析新数据。
+   *
+   * @param length 已写入的字节数
+   * @return void 或错误（提交长度无效）
+   */
   tl::expected<void, Error> advance_write_index(size_t length) {
     if (!buffer.advance_write_index(length)) {
       return tl::unexpected(
@@ -5708,12 +6371,46 @@ public:
     return try_parse_packets();
   }
 
+  /**
+   * @brief 获取反序列化器的引用
+   * @return 反序列化器引用
+   */
   DeserializerType &get_deserializer() noexcept { return deserializer; }
+  
+  /**
+   * @brief 获取可用数据字节数
+   * @return 当前缓冲区中可读数据的总字节数
+   */
   size_t available_data() const noexcept { return buffer.available(); }
+  
+  /**
+   * @brief 获取可用写入空间
+   * @return 总空闲字节数
+   */
   size_t available_space() const noexcept { return buffer.space(); }
+  
+  /**
+   * @brief 检查缓冲区是否已满
+   * @return true 如果没有可用写入空间
+   */
   bool is_buffer_full() const noexcept { return buffer.full(); }
+  
+  /**
+   * @brief 清空缓冲区
+   * 丢弃所有未处理的数据
+   */
   void clear_buffer() noexcept { buffer.clear(); }
 
+  /**
+   * @brief 尝试解析缓冲区中的数据包
+   *
+   * 从当前读取位置开始扫描，查找并解析完整的数据帧。
+   * 解析成功后，已处理的数据会自动从缓冲区移除。
+   *
+   * @return void 或错误（解析错误）
+   * @note 此方法由 push_data() 和 advance_write_index() 自动调用
+   *       也可以手动调用以在特定时间点触发解析
+   */
   tl::expected<void, Error> try_parse_packets() {
     size_t available_bytes = buffer.available();
 
