@@ -138,6 +138,11 @@ template <typename Derived> struct PacketTraitsBase {
   /// @brief 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
   using Protocol = DefaultProtocol;
 
+  /// @brief 是否跳过写入 Deserializer 的 MemoryPool（默认 false）
+  /// @note 若设为 true，Parser 解析成功后不会将该包拷贝到 MemoryPool，
+  ///       适合已通过 after_parse 回调直接消费数据的场景。
+  static constexpr bool skip_memory_pool = false;
+
   /**
    * @brief 获取数据包前的处理
    *
@@ -167,6 +172,8 @@ template <typename Derived> struct PacketTraitsBase {
  * - 必须定义 `cmd` 静态常量（命令码）
  * - 必须定义 `size` 静态常量（数据包大小）
  * - 可选定义 `BitLayout` 类型（用于位流序列化/反序列化）
+ * - 可选定义 `after_parse` 函数（解析完成后回调，接收 const T&）
+ * - 可选定义 `skip_memory_pool` 静态常量（跳过写入 MemoryPool）
  * - 可选定义 `before_get_custom` 函数（获取前处理）
  *
  * @par 完整特化示例

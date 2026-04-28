@@ -148,6 +148,76 @@ template <> struct ExtractMonitorAndPackets<> {
   using Monitor = NullConnectionMonitor;
   using Packets = TypeList<>;
 };
+
+// --- 数据包 after_parse 分发器 ---
+
+/**
+ * @brief 根据 cmd_id 分发到对应数据包类型的 after_parse 回调
+ *
+ * 在 Parser 成功解析出数据包后，检测该类型是否定义了 after_parse 回调，
+ * 并判断是否需要 skip_memory_pool。
+ *
+ * @tparam DeserializerType Deserializer 类型
+ * @tparam List 数据包类型列表 (TypeList<Ts...>)
+ */
+template <typename DeserializerType, typename List>
+struct PacketDispatcher;
+
+template <typename DeserializerType, typename... Ts>
+struct PacketDispatcher<DeserializerType, TypeList<Ts...>> {
+  static bool dispatch(uint16_t cmd_id, std::span<const uint8_t> s1,
+                       std::span<const uint8_t> s2,
+                       DeserializerType & /*deserializer*/,
+                       bool &skip_pool) {
+    return (try_dispatch<Ts>(cmd_id, s1, s2, skip_pool) || ...);
+  }
+
+private:
+  template <typename T>
+  static bool try_dispatch(uint16_t cmd_id, std::span<const uint8_t> s1,
+                           std::span<const uint8_t> s2, bool &skip_pool) {
+    if (cmd_id != Meta::PacketTraits<T>::cmd)
+      return false;
+    using Traits = Meta::PacketTraits<T>;
+
+    // 执行 after_parse 回调（如果定义了）
+    if constexpr (requires {
+                    Traits::after_parse(std::declval<const T &>());
+                  }) {
+      if constexpr (Meta::HasBitLayout<Traits>) {
+        // BitLayout：先合并到临时缓冲区，再反序列化
+        if (s2.empty()) {
+          Traits::after_parse(RPL::deserialize_bitstream<T>(s1));
+        } else {
+          alignas(alignof(T)) std::array<uint8_t, Traits::size> temp{};
+          std::memcpy(temp.data(), s1.data(), s1.size());
+          std::memcpy(temp.data() + s1.size(), s2.data(), s2.size());
+          Traits::after_parse(RPL::deserialize_bitstream<T>(
+              std::span<const uint8_t>(temp.data(), temp.size())));
+        }
+      } else {
+        // 普通 POD：连续则直接 reinterpret，不连续则先拷贝到对齐缓冲区
+        if (s2.empty()) {
+          Traits::after_parse(*reinterpret_cast<const T *>(s1.data()));
+        } else {
+          alignas(alignof(T)) std::array<uint8_t, Traits::size> temp{};
+          std::memcpy(temp.data(), s1.data(), s1.size());
+          std::memcpy(temp.data() + s1.size(), s2.data(), s2.size());
+          Traits::after_parse(*reinterpret_cast<const T *>(temp.data()));
+        }
+      }
+    }
+
+    // 判断是否跳过 MemoryPool
+    if constexpr (requires { Traits::skip_memory_pool; }) {
+      skip_pool = Traits::skip_memory_pool;
+    } else {
+      skip_pool = false;
+    }
+    return true;
+  }
+};
+
 } // namespace Details
 
 /**
@@ -612,7 +682,14 @@ private:
       payload_s2 = s2.subspan(P::header_size - s1.size(), data_len);
     }
 
-    deserializer.write_segmented(cmd_id, payload_s1, payload_s2);
+    bool skip_pool = false;
+    Details::PacketDispatcher<DeserializerType,
+                              typename Extracted::Packets>::dispatch(
+        cmd_id, payload_s1, payload_s2, deserializer, skip_pool);
+
+    if (!skip_pool) {
+      deserializer.write_segmented(cmd_id, payload_s1, payload_s2);
+    }
 
     // 统一丢弃
     buffer.discard(total_len);

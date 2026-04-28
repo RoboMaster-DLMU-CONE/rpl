@@ -513,6 +513,11 @@ template <typename Derived> struct PacketTraitsBase {
   /// @brief 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
   using Protocol = DefaultProtocol;
 
+  /// @brief 是否跳过写入 Deserializer 的 MemoryPool（默认 false）
+  /// @note 若设为 true，Parser 解析成功后不会将该包拷贝到 MemoryPool，
+  ///       适合已通过 after_parse 回调直接消费数据的场景。
+  static constexpr bool skip_memory_pool = false;
+
   /**
    * @brief 获取数据包前的处理
    *
@@ -542,6 +547,8 @@ template <typename Derived> struct PacketTraitsBase {
  * - 必须定义 `cmd` 静态常量（命令码）
  * - 必须定义 `size` 静态常量（数据包大小）
  * - 可选定义 `BitLayout` 类型（用于位流序列化/反序列化）
+ * - 可选定义 `after_parse` 函数（解析完成后回调，接收 const T&）
+ * - 可选定义 `skip_memory_pool` 静态常量（跳过写入 MemoryPool）
  * - 可选定义 `before_get_custom` 函数（获取前处理）
  *
  * @par 完整特化示例
@@ -6122,6 +6129,76 @@ template <> struct ExtractMonitorAndPackets<> {
   using Monitor = NullConnectionMonitor;
   using Packets = TypeList<>;
 };
+
+// --- 数据包 after_parse 分发器 ---
+
+/**
+ * @brief 根据 cmd_id 分发到对应数据包类型的 after_parse 回调
+ *
+ * 在 Parser 成功解析出数据包后，检测该类型是否定义了 after_parse 回调，
+ * 并判断是否需要 skip_memory_pool。
+ *
+ * @tparam DeserializerType Deserializer 类型
+ * @tparam List 数据包类型列表 (TypeList<Ts...>)
+ */
+template <typename DeserializerType, typename List>
+struct PacketDispatcher;
+
+template <typename DeserializerType, typename... Ts>
+struct PacketDispatcher<DeserializerType, TypeList<Ts...>> {
+  static bool dispatch(uint16_t cmd_id, std::span<const uint8_t> s1,
+                       std::span<const uint8_t> s2,
+                       DeserializerType & /*deserializer*/,
+                       bool &skip_pool) {
+    return (try_dispatch<Ts>(cmd_id, s1, s2, skip_pool) || ...);
+  }
+
+private:
+  template <typename T>
+  static bool try_dispatch(uint16_t cmd_id, std::span<const uint8_t> s1,
+                           std::span<const uint8_t> s2, bool &skip_pool) {
+    if (cmd_id != Meta::PacketTraits<T>::cmd)
+      return false;
+    using Traits = Meta::PacketTraits<T>;
+
+    // 执行 after_parse 回调（如果定义了）
+    if constexpr (requires {
+                    Traits::after_parse(std::declval<const T &>());
+                  }) {
+      if constexpr (Meta::HasBitLayout<Traits>) {
+        // BitLayout：先合并到临时缓冲区，再反序列化
+        if (s2.empty()) {
+          Traits::after_parse(RPL::deserialize_bitstream<T>(s1));
+        } else {
+          alignas(alignof(T)) std::array<uint8_t, Traits::size> temp{};
+          std::memcpy(temp.data(), s1.data(), s1.size());
+          std::memcpy(temp.data() + s1.size(), s2.data(), s2.size());
+          Traits::after_parse(RPL::deserialize_bitstream<T>(
+              std::span<const uint8_t>(temp.data(), temp.size())));
+        }
+      } else {
+        // 普通 POD：连续则直接 reinterpret，不连续则先拷贝到对齐缓冲区
+        if (s2.empty()) {
+          Traits::after_parse(*reinterpret_cast<const T *>(s1.data()));
+        } else {
+          alignas(alignof(T)) std::array<uint8_t, Traits::size> temp{};
+          std::memcpy(temp.data(), s1.data(), s1.size());
+          std::memcpy(temp.data() + s1.size(), s2.data(), s2.size());
+          Traits::after_parse(*reinterpret_cast<const T *>(temp.data()));
+        }
+      }
+    }
+
+    // 判断是否跳过 MemoryPool
+    if constexpr (requires { Traits::skip_memory_pool; }) {
+      skip_pool = Traits::skip_memory_pool;
+    } else {
+      skip_pool = false;
+    }
+    return true;
+  }
+};
+
 } // namespace Details
 
 /**
@@ -6586,7 +6663,14 @@ private:
       payload_s2 = s2.subspan(P::header_size - s1.size(), data_len);
     }
 
-    deserializer.write_segmented(cmd_id, payload_s1, payload_s2);
+    bool skip_pool = false;
+    Details::PacketDispatcher<DeserializerType,
+                              typename Extracted::Packets>::dispatch(
+        cmd_id, payload_s1, payload_s2, deserializer, skip_pool);
+
+    if (!skip_pool) {
+      deserializer.write_segmented(cmd_id, payload_s1, payload_s2);
+    }
 
     // 统一丢弃
     buffer.discard(total_len);
