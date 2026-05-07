@@ -1,113 +1,38 @@
 import os
 import shutil
-import urllib.request
-import tarfile
-import zipfile
-import tempfile
 from pathlib import Path
 
 # Configuration
-SOURCE_DIR = Path("include/RPL")
-DEST_DIR = Path("rpl-arduino/src/RPL")
-# Use root src directory for dependencies to ensure they are in the include path
-DEPS_ROOT = Path("rpl-arduino/src")
-ROOT_SRC = Path("rpl-arduino/src")
+SOURCE_SINGLE_HEADER = Path("include/RPL/RPL.hpp")
+DEST_SRC_DIR = Path("rpl-arduino/src")
+DEST_HEADER = DEST_SRC_DIR / "RPL.h"
 
-DEPS = {
-    "frozen": {
-        "url": "https://github.com/serge-sans-paille/frozen/archive/refs/tags/1.2.0.tar.gz",
-        "type": "tar.gz",
-        "include_src": "frozen-1.2.0/include/frozen",
-        "include_dest": "frozen"
-    },
-    "expected": {
-        "url": "https://github.com/TartanLlama/expected/archive/refs/tags/v1.3.1.zip",
-        "type": "zip",
-        "include_src": "expected-1.3.1/include/tl",
-        "include_dest": "tl"
-    },
-    "cppcrc": {
-        "url": "https://codeload.github.com/DarrenLevine/cppcrc/zip/refs/heads/main",
-        "type": "zip",
-        "include_src": "cppcrc-main/cppcrc.h",
-        "include_dest": "cppcrc.h", 
-        "is_file": True
-    }
-}
 
 def clean_dir(path):
     if path.exists():
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
 
-def download_extract(url, type, is_file=False):
-    tmp_dir = tempfile.mkdtemp()
-    file_name = url.split('/')[-1]
-    file_path = os.path.join(tmp_dir, file_name)
-    
-    print(f"Downloading {url}...")
-    urllib.request.urlretrieve(url, file_path)
-    
-    extract_dir = os.path.join(tmp_dir, "extracted")
-    os.makedirs(extract_dir, exist_ok=True)
-    
-    if type == "tar.gz":
-        with tarfile.open(file_path, "r:gz") as tar:
-            tar.extractall(path=extract_dir)
-    elif type == "zip":
-        with zipfile.ZipFile(file_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-            
-    return extract_dir
 
-def sync_rpl():
-    print("Syncing RPL core...")
-    if DEST_DIR.exists():
-        shutil.rmtree(DEST_DIR)
-    shutil.copytree(SOURCE_DIR, DEST_DIR)
+def sync_arduino():
+    if not SOURCE_SINGLE_HEADER.exists():
+        raise FileNotFoundError(
+            f"Single header not found at {SOURCE_SINGLE_HEADER}. "
+            "Please run scripts/amalgamate.py first."
+        )
 
-def sync_deps():
-    # Dependencies are now installed directly into src/ so they are in the include path
-    # We do NOT clean DEPS_ROOT here as it contains RPL code
-    
-    for name, config in DEPS.items():
-        print(f"Processing {name}...")
-        extract_path = download_extract(config["url"], config["type"])
-        
-        src = Path(extract_path) / config["include_src"]
-        dest = DEPS_ROOT / config["include_dest"]
-        
-        # Clean destination if it exists
-        if dest.exists():
-            if dest.is_dir():
-                shutil.rmtree(dest)
-            else:
-                os.remove(dest)
-        
-        if config.get("is_file"):
-            shutil.copy2(src, dest)
-        else:
-            shutil.copytree(src, dest)
-            
-        print(f"Installed {name} to {dest}")
+    # Clean and recreate src directory in target repo
+    clean_dir(DEST_SRC_DIR)
 
-def create_entry_header():
-    # Create the main header that Arduino users will include
-    with open("rpl-arduino/src/RPL.h", "w") as f:
-        f.write("#pragma once\n")
-        f.write("#include \"RPL/Parser.hpp\"\n")
-        f.write("#include \"RPL/Serializer.hpp\"\n")
-        f.write("#include \"RPL/Deserializer.hpp\"\n")
+    # Copy single header as RPL.h (Arduino convention uses .h extension)
+    shutil.copy2(SOURCE_SINGLE_HEADER, DEST_HEADER)
+    print(f"Copied single header to {DEST_HEADER}")
+
 
 def main():
-    # Create target directory structure
-    clean_dir(ROOT_SRC)
-    
-    sync_rpl()
-    sync_deps()
-    create_entry_header()
-    
-    print("Synchronization complete!")
+    sync_arduino()
+    print("Arduino synchronization complete!")
+
 
 if __name__ == "__main__":
     main()
