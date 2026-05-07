@@ -1,6 +1,6 @@
 {
   "name": "RPL",
-  "version": "0.3.1",
+  "version": "1.1.0",
   "description": "High-performance C++20 serialization/deserialization library for RoboMaster",
   "keywords": "robomaster, serialization, packet, protocol, c++20",
   "repository": {
