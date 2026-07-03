@@ -92,12 +92,12 @@ namespace crc_utils
     template <typename out_t, out_t poly, bool refl_in, bool refl_out, size_t size, size_t... indexes>
     struct crc_lookup_table<out_t, poly, refl_in, refl_out, size, std::index_sequence<indexes...>>
     {
-        static constexpr out_t value[size] = {get_crc_table_value_at_index<out_t, poly, refl_in, refl_out, indexes>()...};
+        __attribute__((used, retain)) static constexpr out_t value[size] = {get_crc_table_value_at_index<out_t, poly, refl_in, refl_out, indexes>()...};
     };
 
 #if ((defined(_MSVC_LANG) && _MSVC_LANG < 201703L) || (defined(__cplusplus) && __cplusplus < 201703L)) // redeclaration is only needed before C++17
     template <typename out_t, out_t poly, bool refl_in, bool refl_out, size_t size, size_t... indexes>
-    constexpr out_t crc_lookup_table<out_t, poly, refl_in, refl_out, size, std::index_sequence<indexes...>>::value[size];
+    constexpr std::array<out_t, size> crc_lookup_table<out_t, poly, refl_in, refl_out, size, std::index_sequence<indexes...>>::value;
 #endif
 
     template <typename out_t, out_t poly, bool refl_in, bool refl_out, out_t x_or_out, typename std::enable_if<refl_in, int *>::type = nullptr>

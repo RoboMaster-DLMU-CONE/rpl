@@ -30,6 +30,8 @@ namespace RPL
         BufferOverflow,   ///< 缓冲区溢出
         InternalError,    ///< 内部错误
         InvalidCommand,   ///< 无效命令
+        Timeout,          ///< 超时（Ack 超时）
+        AckMismatch,      ///< Ack 匹配失败
     };
 
     /**

@@ -23,6 +23,13 @@ using ProtocolCRC8 = crc_utils::crc<uint8_t, 0x31, 0xFF, true, true, 0x00>;
 /// 与裁判系统协议一致
 using ProtocolCRC16 = CRC16::MCRF4XX;
 
+struct NoopCRC {
+  using type = uint16_t;
+  static constexpr uint16_t calc(const uint8_t *, size_t, uint16_t = 0) {
+    return 0;
+  }
+};
+
 } // namespace RPL
 
 #endif // RPL_DEF_HPP

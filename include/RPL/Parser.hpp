@@ -638,33 +638,33 @@ private:
     if (buffer.available() < total_len)
       return ParseResult::Incomplete;
 
-    // 获取分段读视图，进行分段 CRC 校验
+    // 获取分段读视图
     auto [s1, s2] = buffer.get_read_spans(0, total_len);
 
-    size_t calc_len = total_len - P::tail_size;
-    uint16_t calc_crc = 0;
+    if constexpr (P::tail_size > 0) {
+      size_t calc_len = total_len - P::tail_size;
+      uint16_t calc_crc = 0;
 
-    if (calc_len <= s1.size()) {
-      calc_crc = P::RPL_CRC::calc(s1.data(), calc_len);
-    } else {
-      calc_crc = P::RPL_CRC::calc(s1.data(), s1.size());
-      calc_crc = P::RPL_CRC::calc(s2.data(), calc_len - s1.size(), calc_crc);
+      if (calc_len <= s1.size()) {
+        calc_crc = P::RPL_CRC::calc(s1.data(), calc_len);
+      } else {
+        calc_crc = P::RPL_CRC::calc(s1.data(), s1.size());
+        calc_crc = P::RPL_CRC::calc(s2.data(), calc_len - s1.size(), calc_crc);
+      }
+
+      uint16_t recv_crc = 0;
+      if (calc_len + 2 <= s1.size()) {
+        std::memcpy(&recv_crc, s1.data() + calc_len, 2);
+      } else if (calc_len >= s1.size()) {
+        std::memcpy(&recv_crc, s2.data() + (calc_len - s1.size()), 2);
+      } else {
+        recv_crc =
+            s1.data()[calc_len] | (static_cast<uint16_t>(s2.data()[0]) << 8);
+      }
+
+      if (calc_crc != recv_crc)
+        return ParseResult::Failure;
     }
-
-    // 验证接收到的 CRC
-    uint16_t recv_crc = 0;
-    if (calc_len + 2 <= s1.size()) {
-      std::memcpy(&recv_crc, s1.data() + calc_len, 2);
-    } else if (calc_len >= s1.size()) {
-      std::memcpy(&recv_crc, s2.data() + (calc_len - s1.size()), 2);
-    } else {
-      // CRC 跨越了 A/B 边界
-      recv_crc =
-          s1.data()[calc_len] | (static_cast<uint16_t>(s2.data()[0]) << 8);
-    }
-
-    if (calc_crc != recv_crc)
-      return ParseResult::Failure;
 
     // 反序列化 (分段拷贝)
     std::span<const uint8_t> payload_s1, payload_s2;

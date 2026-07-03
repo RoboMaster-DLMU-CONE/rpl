@@ -169,16 +169,16 @@ public:
       }
 
       // 帧尾 (CRC)
-      // 使用协议特定的 CRC 算法
-      using FrameCRC = typename Protocol::RPL_CRC;
-      const uint16_t frame_crc16 =
-          FrameCRC::calc(current_buffer, Protocol::header_size + data_size);
+      if constexpr (Protocol::tail_size > 0) {
+        using FrameCRC = typename Protocol::RPL_CRC;
+        const uint16_t frame_crc16 =
+            FrameCRC::calc(current_buffer, Protocol::header_size + data_size);
 
-      // CRC16 采用小端格式
-      current_buffer[Protocol::header_size + data_size] =
-          static_cast<uint8_t>(frame_crc16 & 0xFF);
-      current_buffer[Protocol::header_size + data_size + 1] =
-          static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
+        current_buffer[Protocol::header_size + data_size] =
+            static_cast<uint8_t>(frame_crc16 & 0xFF);
+        current_buffer[Protocol::header_size + data_size + 1] =
+            static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
+      }
 
       offset += current_frame_size;
     };

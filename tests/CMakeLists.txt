@@ -7,6 +7,7 @@ add_subdirectory(deserialization)
 add_subdirectory(parser)
 add_subdirectory(integration)
 add_subdirectory(traits)
+add_subdirectory(usb)
 
 if (EXISTS "${PROJECT_SOURCE_DIR}/include/RPL/RPL.hpp")
     add_executable(test_amalgamation test_amalgamation.cpp)

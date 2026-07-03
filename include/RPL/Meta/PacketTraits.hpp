@@ -26,6 +26,13 @@
 #include <cstdint>
 
 namespace RPL::Meta {
+
+enum class PacketCategory : uint8_t {
+  Notification,
+  Request,
+  Ack,
+};
+
 /**
  * @brief 默认 RoboMaster 协议定义
  *
@@ -107,6 +114,29 @@ struct DefaultProtocol {
   static constexpr size_t cmd_field_bytes = 2; ///< 命令码字段占用的字节数
 };
 
+struct USBBaseProto {
+  static constexpr uint8_t start_byte = 0xA5;
+  static constexpr bool has_second_byte = false;
+  static constexpr size_t header_size = 3;
+  static constexpr size_t tail_size = 0;
+
+  static constexpr bool has_header_crc = false;
+  using RPL_CRC = RPL::NoopCRC;
+
+  static constexpr bool has_seq_field = false;
+
+  static constexpr bool has_length_field = true;
+  static constexpr size_t length_offset = 1;
+  static constexpr size_t length_field_bytes = 1;
+
+  static constexpr bool has_cmd_field = true;
+  static constexpr size_t cmd_offset = 2;
+  static constexpr size_t cmd_field_bytes = 1;
+};
+
+using USBRequestProto = USBBaseProto;
+using USBAckProto = USBBaseProto;
+
 /**
  * @brief 数据包特性基类
  *
@@ -137,6 +167,9 @@ template <typename Derived> struct PacketTraitsBase {
 
   /// @brief 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
   using Protocol = DefaultProtocol;
+
+  /// @brief 包分类：Notification（单向通知）、Request（期望 Ack）、Ack（确认包）
+  static constexpr PacketCategory category = PacketCategory::Notification;
 
   /// @brief 是否跳过写入 Deserializer 的 MemoryPool（默认 false）
   /// @note 若设为 true，Parser 解析成功后不会将该包拷贝到 MemoryPool，
