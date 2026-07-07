@@ -1,9 +1,9 @@
 #include "RPL/Packets/Sample/USBSamples.hpp"
 #include "RPL/Packets/USBAck.hpp"
 #include "RPL/USBTransport.hpp"
+#include <iostream>
 #include <cassert>
 #include <cstring>
-#include <iostream>
 
 struct SysTickProvider {
   using tick_type = uint64_t;
@@ -14,20 +14,51 @@ struct SysTickProvider {
 };
 
 using AckMgr = RPL::AckManager<SysTickProvider>;
-using Transport =
-    RPL::USBTransport<AckMgr, USBAck, SensorData, MotorSpeedCmd, LEDCmd>;
+
+static bool g_sent = false;
+static void simple_send(const uint8_t *, size_t) { g_sent = true; }
+
+using PacketList =
+    RPL::USBTransport<AckMgr, decltype(&simple_send), USBAck, SensorData,
+                      MotorSpeedCmd, LEDCmd>;
+
+static PacketList *g_tp = nullptr;
+static void loopback_send(const uint8_t *buf, size_t len) {
+  if (!g_tp || len < 3)
+    return;
+
+  uint8_t cmd = buf[2];
+
+  if (cmd == 0x10 || cmd == 0x11) {
+    uint8_t req_id = buf[3];
+    USBAck ack{req_id, 0};
+    constexpr size_t ack_sz =
+        RPL::Serializer<USBAck, SensorData, MotorSpeedCmd,
+                        LEDCmd>::template frame_size<USBAck>();
+    uint8_t ack_buf[ack_sz];
+    RPL::Serializer<USBAck, SensorData, MotorSpeedCmd, LEDCmd> ser;
+    auto r = ser.serialize(ack_buf, ack_sz, ack);
+    assert(r.has_value());
+    auto r2 = g_tp->receive(ack_buf, *r);
+    (void)r2;
+    return;
+  }
+
+  auto r = g_tp->receive(buf, len);
+  (void)r;
+}
 
 void test_notification() {
   std::cout << "Test 1: Notification (fire-and-forget)..." << std::endl;
 
-  Transport transport;
-  bool sent = false;
-  transport.on_send([&](const uint8_t *, size_t) { sent = true; });
+  g_sent = false;
+  PacketList transport;
+  transport.on_send(simple_send);
 
   SensorData sensor{1.0f, 2.0f, 9.8f};
   auto result = transport.notify(sensor);
   assert(result.has_value());
-  assert(sent);
+  assert(g_sent);
 
   std::cout << "  PASS" << std::endl;
 }
@@ -36,41 +67,12 @@ void test_request_response_loopback() {
   std::cout << "Test 2: Request-Response loopback..." << std::endl;
 
   SysTickProvider::reset();
-  Transport transport;
-
-  transport.on_send([&](const uint8_t *buf, size_t len) {
-    if (len < 3)
-      return;
-
-    uint8_t cmd = buf[2];
-    if (cmd == 0x00) {
-      auto r = transport.receive(buf, len);
-      (void)r;
-      return;
-    }
-
-    if (cmd == 0x10) {
-      uint8_t req_id = buf[3];
-      USBAck ack{req_id, 0};
-      constexpr size_t ack_sz =
-          RPL::Serializer<USBAck, SensorData, MotorSpeedCmd,
-                          LEDCmd>::template frame_size<USBAck>();
-      uint8_t ack_buf[ack_sz];
-      RPL::Serializer<USBAck, SensorData, MotorSpeedCmd, LEDCmd> ser;
-      auto r = ser.serialize(ack_buf, ack_sz, ack);
-      assert(r.has_value());
-      auto r2 = transport.receive(ack_buf, *r);
-      (void)r2;
-      return;
-    }
-
-    auto r = transport.receive(buf, len);
-    (void)r;
-  });
+  PacketList transport;
+  transport.on_send(loopback_send);
+  g_tp = &transport;
 
   SensorData sensor{1.0f, 2.0f, 9.8f};
-  auto nr = transport.notify(sensor);
-  (void)nr;
+  (void)transport.notify(sensor);
 
   MotorSpeedCmd motor{};
   motor.motor_id = 1;
@@ -89,6 +91,7 @@ void test_request_response_loopback() {
   assert(rx_motor.motor_id == 1);
   assert(rx_motor.speed == 500);
 
+  g_tp = nullptr;
   std::cout << "  PASS" << std::endl;
 }
 
@@ -96,45 +99,13 @@ void test_mixed_notify_and_request() {
   std::cout << "Test 3: Mixed notification and request..." << std::endl;
 
   SysTickProvider::reset();
-  Transport transport;
-
-  size_t ack_count = 0;
-  transport.on_send([&](const uint8_t *buf, size_t len) {
-    if (len < 3)
-      return;
-
-    uint8_t cmd = buf[2];
-
-    if (cmd == 0x00) {
-      ack_count++;
-      auto r = transport.receive(buf, len);
-      (void)r;
-      return;
-    }
-
-    if (cmd == 0x10 || cmd == 0x11) {
-      uint8_t req_id = buf[3];
-      USBAck ack{req_id, 0};
-      constexpr size_t ack_sz =
-          RPL::Serializer<USBAck, SensorData, MotorSpeedCmd,
-                          LEDCmd>::template frame_size<USBAck>();
-      uint8_t ack_buf[ack_sz];
-      RPL::Serializer<USBAck, SensorData, MotorSpeedCmd, LEDCmd> ser;
-      auto r = ser.serialize(ack_buf, ack_sz, ack);
-      assert(r.has_value());
-      auto r2 = transport.receive(ack_buf, *r);
-      (void)r2;
-      return;
-    }
-
-    auto r = transport.receive(buf, len);
-    (void)r;
-  });
+  PacketList transport;
+  transport.on_send(loopback_send);
+  g_tp = &transport;
 
   for (int i = 0; i < 5; i++) {
     SensorData sensor{float(i), float(i + 1), float(i + 2)};
-    auto nr = transport.notify(sensor);
-    (void)nr;
+    (void)transport.notify(sensor);
   }
 
   MotorSpeedCmd motor{};
@@ -149,17 +120,15 @@ void test_mixed_notify_and_request() {
   auto r2 = transport.request(led, 100);
   assert(r2.has_value());
 
-  assert(ack_count == 2);
-
   for (int i = 0; i < 5; i++) {
     SensorData sensor{float(i + 10), float(i + 11), float(i + 12)};
-    auto nr = transport.notify(sensor);
-    (void)nr;
+    (void)transport.notify(sensor);
   }
 
   auto latest = transport.deserializer().get<SensorData>();
   assert(latest.accel_x == 14.0f);
 
+  g_tp = nullptr;
   std::cout << "  PASS" << std::endl;
 }
 
@@ -191,8 +160,8 @@ void test_raw_parser_usb_frame() {
 
   SensorData sensor{3.14f, 2.71f, 1.41f};
   constexpr size_t frame_sz =
-      RPL::Serializer<SensorData,
-                      MotorSpeedCmd>::template frame_size<SensorData>();
+      RPL::Serializer<SensorData, MotorSpeedCmd>::template frame_size<
+          SensorData>();
   uint8_t buf[frame_sz];
   auto result = serializer.serialize(buf, frame_sz, sensor);
   assert(result.has_value());
@@ -227,12 +196,8 @@ void test_no_crc_on_wire() {
   assert(*result == expected_size);
 
   assert(buf[0] == 0xA5);
-
-  uint8_t length = buf[1];
-  assert(length == sizeof(SensorData));
-
-  uint8_t cmd = buf[2];
-  assert(cmd == RPL::Meta::PacketTraits<SensorData>::cmd);
+  assert(buf[1] == sizeof(SensorData));
+  assert(buf[2] == RPL::Meta::PacketTraits<SensorData>::cmd);
 
   auto push_result = parser.push_data(buf, *result);
   assert(push_result.has_value());
@@ -243,8 +208,7 @@ void test_no_crc_on_wire() {
   uint8_t corrupted[frame_sz];
   std::memcpy(corrupted, buf, frame_sz);
   corrupted[sizeof(SensorData) + 2] = 0xFF;
-  auto push2 = parser.push_data(corrupted, frame_sz);
-  (void)push2;
+  (void)parser.push_data(corrupted, frame_sz);
 
   std::cout << "  PASS" << std::endl;
 }

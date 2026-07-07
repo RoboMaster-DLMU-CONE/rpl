@@ -6,18 +6,25 @@
 #include "RPL/Serializer.hpp"
 #include "RPL/Utils/AckManager.hpp"
 #include <cstdint>
-#include <functional>
 #include <tl/expected.hpp>
 
 namespace RPL {
+namespace detail {
+struct NoSend {
+  void operator()(const uint8_t *, size_t) const {}
+  explicit operator bool() const { return false; }
+};
+} // namespace detail
 
-template <typename AckMgr, typename... Packets>
+template <typename AckMgr, typename SendFunc, typename... Packets>
 class USBTransport {
 public:
-  using SendCallback = std::function<void(const uint8_t *, size_t)>;
   using tick_type = typename AckMgr::tick_type;
 
   USBTransport() : parser_(deserializer_) {}
+
+  explicit USBTransport(SendFunc cb)
+      : parser_(deserializer_), send_cb_(std::move(cb)), has_send_(true) {}
 
   Deserializer<Packets...> &deserializer() noexcept { return deserializer_; }
   const Deserializer<Packets...> &deserializer() const noexcept {
@@ -30,7 +37,12 @@ public:
   AckMgr &ack_manager() noexcept { return ack_mgr_; }
   const AckMgr &ack_manager() const noexcept { return ack_mgr_; }
 
-  void on_send(SendCallback cb) { send_cb_ = std::move(cb); }
+  void on_send(SendFunc cb) {
+    send_cb_ = std::move(cb);
+    has_send_ = true;
+  }
+
+  bool has_send() const { return has_send_; }
 
   tl::expected<void, Error> receive(const uint8_t *buf, size_t len) {
     if (len >= 4) {
@@ -47,7 +59,7 @@ public:
   template <typename T>
     requires Serializable<T, Packets...>
   tl::expected<void, Error> notify(const T &packet) {
-    if (!send_cb_)
+    if (!has_send_)
       return tl::unexpected(
           Error{ErrorCode::InternalError, "Send callback not set"});
 
@@ -66,11 +78,12 @@ public:
   template <typename T>
     requires Serializable<T, Packets...>
   tl::expected<uint8_t, Error> request(T &packet, tick_type timeout_ms) {
-    if (!send_cb_)
+    if (!has_send_)
       return tl::unexpected(
           Error{ErrorCode::InternalError, "Send callback not set"});
 
-    if constexpr (Meta::PacketTraits<T>::category == Meta::PacketCategory::Request) {
+    if constexpr (Meta::PacketTraits<T>::category ==
+                  Meta::PacketCategory::Request) {
       packet.req_id = ack_mgr_.allocate();
     }
 
@@ -97,9 +110,14 @@ private:
   Serializer<Packets...> serializer_{};
   Parser<Packets...> parser_;
   [[no_unique_address]] AckMgr ack_mgr_{};
-  SendCallback send_cb_;
+  [[no_unique_address]] SendFunc send_cb_{};
+  bool has_send_{false};
   tick_type default_timeout_ms_{100};
 };
+
+template <typename AckMgr, typename... Packets>
+using USBTransportFn =
+    USBTransport<AckMgr, void (*)(const uint8_t *, size_t), Packets...>;
 
 } // namespace RPL
 
