@@ -10,8 +10,9 @@ struct USBAck {
   uint8_t status;
 };
 
+namespace RPL::Meta {
 template <>
-struct RPL::Meta::PacketTraits<USBAck>
+struct PacketTraits<USBAck>
     : PacketTraitsBase<PacketTraits<USBAck>> {
   static constexpr uint16_t cmd = 0x0000;
   static constexpr size_t size = sizeof(USBAck);
@@ -19,6 +20,7 @@ struct RPL::Meta::PacketTraits<USBAck>
   static constexpr bool skip_memory_pool = true;
   using Protocol = USBAckProto;
 };
+} // namespace RPL::Meta
 
 #pragma pack(pop)
 #endif // RPL_USB_ACK_HPP

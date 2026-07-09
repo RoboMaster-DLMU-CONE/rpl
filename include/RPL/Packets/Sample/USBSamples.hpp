@@ -11,8 +11,9 @@ struct SensorData {
   float accel_z;
 };
 
+namespace RPL::Meta {
 template <>
-struct RPL::Meta::PacketTraits<SensorData>
+struct PacketTraits<SensorData>
     : PacketTraitsBase<PacketTraits<SensorData>> {
   static constexpr uint16_t cmd = 0x20;
   static constexpr size_t size = sizeof(SensorData);
@@ -26,7 +27,7 @@ struct MotorSpeedCmd {
 };
 
 template <>
-struct RPL::Meta::PacketTraits<MotorSpeedCmd>
+struct PacketTraits<MotorSpeedCmd>
     : PacketTraitsBase<PacketTraits<MotorSpeedCmd>> {
   static constexpr uint16_t cmd = 0x10;
   static constexpr size_t size = sizeof(MotorSpeedCmd);
@@ -41,13 +42,14 @@ struct LEDCmd {
 };
 
 template <>
-struct RPL::Meta::PacketTraits<LEDCmd>
+struct PacketTraits<LEDCmd>
     : PacketTraitsBase<PacketTraits<LEDCmd>> {
   static constexpr uint16_t cmd = 0x11;
   static constexpr size_t size = sizeof(LEDCmd);
   static constexpr PacketCategory category = PacketCategory::Request;
   using Protocol = USBRequestProto;
 };
+} // namespace RPL::Meta
 
 #pragma pack(pop)
 #endif // RPL_USB_SAMPLES_HPP

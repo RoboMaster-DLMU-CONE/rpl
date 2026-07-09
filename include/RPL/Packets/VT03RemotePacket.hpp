@@ -96,8 +96,9 @@ struct VT03RemotePacket {
 };
 
 #ifdef __cplusplus
+namespace RPL::Meta {
 template <>
-struct RPL::Meta::PacketTraits<VT03RemotePacket> : PacketTraitsBase<PacketTraits<VT03RemotePacket>> {
+struct PacketTraits<VT03RemotePacket> : PacketTraitsBase<PacketTraits<VT03RemotePacket>> {
   static constexpr uint16_t cmd = 0xA953;
   static constexpr size_t size = 17;
   using Protocol = VT03RemoteProtocol;
@@ -125,6 +126,7 @@ struct RPL::Meta::PacketTraits<VT03RemotePacket> : PacketTraitsBase<PacketTraits
       RPL::Meta::Field<uint16_t, 1>,  RPL::Meta::Field<uint16_t, 1>
   >;
 };
+} // namespace RPL::Meta
 #endif // __cplusplus
 
 #pragma pack(pop)

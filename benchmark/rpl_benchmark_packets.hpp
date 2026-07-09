@@ -22,33 +22,35 @@ struct XLargePacket {
   std::array<uint8_t, 8192> payload{};
 };
 
+namespace RPL::Meta {
 template <>
-struct RPL::Meta::PacketTraits<SmallPacket>
+struct PacketTraits<SmallPacket>
     : PacketTraitsBase<PacketTraits<SmallPacket>> {
   static constexpr uint16_t cmd = 0x1101;
   static constexpr size_t size = sizeof(SmallPacket);
 };
 
 template <>
-struct RPL::Meta::PacketTraits<MediumPacket>
+struct PacketTraits<MediumPacket>
     : PacketTraitsBase<PacketTraits<MediumPacket>> {
   static constexpr uint16_t cmd = 0x1102;
   static constexpr size_t size = sizeof(MediumPacket);
 };
 
 template <>
-struct RPL::Meta::PacketTraits<LargePacket>
+struct PacketTraits<LargePacket>
     : PacketTraitsBase<PacketTraits<LargePacket>> {
   static constexpr uint16_t cmd = 0x1103;
   static constexpr size_t size = sizeof(LargePacket);
 };
 
 template <>
-struct RPL::Meta::PacketTraits<XLargePacket>
+struct PacketTraits<XLargePacket>
     : PacketTraitsBase<PacketTraits<XLargePacket>> {
   static constexpr uint16_t cmd = 0x1104;
   static constexpr size_t size = sizeof(XLargePacket);
 };
+} // namespace RPL::Meta
 
 // --- Bitfield Packets ---
 

@@ -44,6 +44,10 @@ target_link_libraries(rpl INTERFACE
 
 target_compile_features(rpl INTERFACE cxx_std_20)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    target_compile_options(rpl INTERFACE /utf-8)
+endif()
+
 # 环境检测：在 Linux 环境下默认使用 std::atomic 保证多核安全
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(RPL_USE_STD_ATOMIC_DEFAULT ON)

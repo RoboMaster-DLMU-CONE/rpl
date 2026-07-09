@@ -317,25 +317,27 @@ template <typename... Args> class Parser {
     static constexpr size_t buffer_size = calculate_buffer_size();
 
     // --- 构建查找表 ---
+    template <typename W>
+    static constexpr void register_packet(std::array<uint8_t, 256>& table,
+                                          size_t index) {
+      uint8_t sb = W::Protocol::start_byte;
+      if (table[sb] != 0xFF && table[sb] != index) {
+        RPL_ERROR_START_BYTE_COLLISION();
+      }
+      table[sb] = static_cast<uint8_t>(index);
+    }
+
+    template <typename... Ws>
+    static constexpr void build_header_impl(
+        std::array<uint8_t, 256>& table, Details::TypeList<Ws...>) {
+      size_t idx = 0;
+      ((register_packet<Ws>(table, idx++)), ...);
+    }
+
     static constexpr auto header_lut = []() {
       std::array<uint8_t, 256> table;
       table.fill(0xFF);
-
-      auto register_worker = [&table]<typename W>(size_t index) {
-        uint8_t sb = W::Protocol::start_byte;
-        if (table[sb] != 0xFF && table[sb] != index) {
-          RPL_ERROR_START_BYTE_COLLISION();
-        }
-        table[sb] = static_cast<uint8_t>(index);
-      };
-
-      auto helper =
-          [&register_worker]<typename... Ws>(Details::TypeList<Ws...>) {
-            size_t idx = 0;
-            ((register_worker.template operator()<Ws>(idx++)), ...);
-          };
-      helper(UniqueWorkers{});
-
+      build_header_impl(table, UniqueWorkers{});
       return table;
     }();
 

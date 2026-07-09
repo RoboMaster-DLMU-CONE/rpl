@@ -9,12 +9,14 @@ struct SampleB
     double y;
 };
 
+namespace RPL::Meta {
 template <>
-struct RPL::Meta::PacketTraits<SampleB> : PacketTraitsBase<PacketTraits<SampleB>>
+struct PacketTraits<SampleB> : PacketTraitsBase<PacketTraits<SampleB>>
 {
     static constexpr uint16_t cmd = 0x0103;
     static constexpr size_t size = sizeof(SampleB);
 };
+} // namespace RPL::Meta
 
 #endif //RPL_SAMPLEB_HPP
 
