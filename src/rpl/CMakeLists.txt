@@ -5,41 +5,25 @@ add_library(rpl::rpl ALIAS rpl)
 target_include_directories(rpl INTERFACE
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-        $<BUILD_INTERFACE:${cppcrc_SOURCE_DIR}>
-        $<INSTALL_INTERFACE:include>
 )
 
 if (ZEPHYR_TOOLCHAIN_VARIANT AND CONFIG_RPL STREQUAL "y")
   zephyr_include_directories(${PROJECT_SOURCE_DIR}/include)
 
-  # Handle cppcrc include directory
-  if(DEFINED cppcrc_SOURCE_DIR)
-    zephyr_include_directories(${cppcrc_SOURCE_DIR})
-  endif()
-
-  if(DEFINED frozen_SOURCE_DIR)
-    zephyr_include_directories(${frozen_SOURCE_DIR}/include)
-  elseif(TARGET frozen::frozen)
-    get_target_property(frozen_includes frozen::frozen INTERFACE_INCLUDE_DIRECTORIES)
-    if(frozen_includes)
-      zephyr_include_directories(${frozen_includes})
+  foreach(_dep rpl_cppcrc rpl_frozen rpl_expected)
+    if(TARGET ${_dep})
+      get_target_property(_inc ${_dep} INTERFACE_INCLUDE_DIRECTORIES)
+      if(_inc)
+        zephyr_include_directories(${_inc})
+      endif()
     endif()
-  endif()
-
-  # Handle tl-expected include directory
-  if(DEFINED tl-expected_SOURCE_DIR)
-    zephyr_include_directories(${tl-expected_SOURCE_DIR}/include)
-  elseif(TARGET tl::expected)
-    get_target_property(expected_includes tl::expected INTERFACE_INCLUDE_DIRECTORIES)
-    if(expected_includes)
-      zephyr_include_directories(${expected_includes})
-    endif()
-  endif()
+  endforeach()
 endif ()
 
 target_link_libraries(rpl INTERFACE
-        tl::expected
-        frozen
+        $<BUILD_INTERFACE:rpl::cppcrc>
+        $<BUILD_INTERFACE:rpl::expected>
+        $<BUILD_INTERFACE:rpl::frozen>
 )
 
 target_compile_features(rpl INTERFACE cxx_std_20)
@@ -81,9 +65,17 @@ if (NOT ZEPHYR_TOOLCHAIN_VARIANT)
             FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     )
 
-  # Install cppcrc header (it's a header-only library without install support)
-  install(FILES ${cppcrc_SOURCE_DIR}/cppcrc.h
+  # Install vendored third-party headers
+  install(FILES ${PROJECT_SOURCE_DIR}/3rdparty/cppcrc/cppcrc.h
             DESTINATION include
+    )
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/3rdparty/frozen/frozen
+            DESTINATION include
+            FILES_MATCHING PATTERN "*.h"
+    )
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/3rdparty/tl-expected/tl
+            DESTINATION include
+            FILES_MATCHING PATTERN "*.hpp"
     )
 
   # Install the rpl target

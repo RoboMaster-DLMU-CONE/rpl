@@ -13,6 +13,7 @@ option(BUILD_RPL_DOC "Enable building RPL Document" OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(FRAME_HEADER_TAG "0xA5")
 
+add_subdirectory(3rdparty)
 add_subdirectory(src)
 
 if (BUILD_RPL_SAMPLES)

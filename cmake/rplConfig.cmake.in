@@ -2,13 +2,8 @@
 
 include(CMakeFindDependencyMacro)
 
-# Find dependencies that provide CMake config files
-# These are installed alongside RPL
-find_dependency(tl-expected)
-find_dependency(frozen)
-
-# cppcrc is bundled as a header file in the include directory
-# No need to find it separately
+# cppcrc, frozen, and tl-expected are bundled as header files
+# in the include directory. No need to find them separately.
 
 # Include the targets file
 include("${CMAKE_CURRENT_LIST_DIR}/rplTargets.cmake")
