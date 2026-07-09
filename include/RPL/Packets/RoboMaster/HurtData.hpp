@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 伤害状态数据，伤害发生后发送
@@ -14,7 +15,7 @@ struct HurtData
 {
     uint8_t armor_id : 4; ///< 受击装甲板ID (0-4)
     uint8_t hp_deduction_reason : 4; ///< 扣血原因：0-弹丸, 1-撞击/离线, 5-撞击
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<HurtData> : PacketTraitsBase<PacketTraits<HurtData>>
@@ -26,4 +27,5 @@ struct RPL::Meta::PacketTraits<HurtData> : PacketTraitsBase<PacketTraits<HurtDat
         Field<uint8_t, 4>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_HURTDATA_HPP

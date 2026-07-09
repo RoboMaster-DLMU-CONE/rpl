@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 自定义控制器与机器人交互数据，频率上限 30Hz
@@ -11,7 +12,7 @@
 struct CustomControllerData
 {
     std::array<uint8_t, 30> data; ///< 自定义数据内容
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<CustomControllerData> : PacketTraitsBase<PacketTraits<CustomControllerData>>
@@ -19,4 +20,5 @@ struct RPL::Meta::PacketTraits<CustomControllerData> : PacketTraitsBase<PacketTr
     static constexpr uint16_t cmd = 0x0302;
     static constexpr size_t size = sizeof(CustomControllerData);
 };
+#pragma pack(pop)
 #endif // RPL_CUSTOMCONTROLLERDATA_HPP

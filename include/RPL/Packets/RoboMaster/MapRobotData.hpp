@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 选手端小地图接收机器人位置，5Hz 频率上限
@@ -22,7 +23,7 @@ struct MapRobotData
     uint16_t infantry_5_position_y; ///< 5号步兵 Y 坐标 (cm)
     uint16_t sentry_position_x; ///< 哨兵 X 坐标 (cm)
     uint16_t sentry_position_y; ///< 哨兵 Y 坐标 (cm)
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<MapRobotData> : PacketTraitsBase<PacketTraits<MapRobotData>>
@@ -30,4 +31,5 @@ struct RPL::Meta::PacketTraits<MapRobotData> : PacketTraitsBase<PacketTraits<Map
     static constexpr uint16_t cmd = 0x0305;
     static constexpr size_t size = sizeof(MapRobotData);
 };
+#pragma pack(pop)
 #endif // RPL_MAPROBOTDATA_HPP

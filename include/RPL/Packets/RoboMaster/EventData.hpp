@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 场地事件数据，1Hz 频率发送
@@ -23,7 +24,7 @@ struct EventData
     uint32_t outpost_gain_status : 2; ///< bit 27-28：己方前哨站增益点占领状态
     uint32_t base_gain_status : 1; ///< bit 29：己方基地增益点占领状态
     uint32_t reserved : 2; ///< bit 30-31：保留位
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<EventData> : PacketTraitsBase<PacketTraits<EventData>>
@@ -44,4 +45,5 @@ struct RPL::Meta::PacketTraits<EventData> : PacketTraitsBase<PacketTraits<EventD
         Field<uint32_t, 2>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_EVENTDATA_HPP

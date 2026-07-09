@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 选手端小地图交互数据，触发发送
@@ -15,7 +16,7 @@ struct MapCommand
     uint8_t cmd_keyboard; ///< 按下的键盘按键
     uint8_t target_robot_id; ///< 对方机器人 ID
     uint16_t cmd_source; ///< 信息来源 ID
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<MapCommand> : PacketTraitsBase<PacketTraits<MapCommand>>
@@ -23,4 +24,5 @@ struct RPL::Meta::PacketTraits<MapCommand> : PacketTraitsBase<PacketTraits<MapCo
     static constexpr uint16_t cmd = 0x0303;
     static constexpr size_t size = sizeof(MapCommand);
 };
+#pragma pack(pop)
 #endif // RPL_MAPCOMMAND_HPP

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 比赛结果数据，比赛结束触发
@@ -11,7 +12,7 @@
 struct GameResult
 {
     uint8_t winner; ///< 0-平局, 1-红方胜利, 2-蓝方胜利
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<GameResult> : PacketTraitsBase<PacketTraits<GameResult>>
@@ -19,4 +20,5 @@ struct RPL::Meta::PacketTraits<GameResult> : PacketTraitsBase<PacketTraits<GameR
     static constexpr uint16_t cmd = 0x0002;
     static constexpr size_t size = sizeof(GameResult);
 };
+#pragma pack(pop)
 #endif // RPL_GAMERESULT_HPP

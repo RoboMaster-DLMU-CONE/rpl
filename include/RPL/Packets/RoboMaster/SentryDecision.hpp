@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 哨兵自主决策指令 (子协议)
@@ -20,7 +21,7 @@ struct SentryDecision
     uint32_t posture_cmd : 2; ///< 姿态指令：1-进攻, 2-防御, 3-移动
     uint32_t confirm_energy_activation : 1; ///< 确认激活能量机关
     uint32_t reserved : 8; ///< 保留位
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<SentryDecision> : PacketTraitsBase<PacketTraits<SentryDecision>>
@@ -38,4 +39,5 @@ struct RPL::Meta::PacketTraits<SentryDecision> : PacketTraitsBase<PacketTraits<S
         Field<uint32_t, 8>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_SENTRYDECISION_HPP

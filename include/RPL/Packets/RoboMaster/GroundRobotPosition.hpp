@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 地面机器人位置数据，1Hz 频率发送
@@ -20,7 +21,7 @@ struct GroundRobotPosition
     float standard_4_y; ///< 4号步兵 Y 坐标 (m)
     float reserved_0; ///< 保留位
     float reserved_1; ///< 保留位
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<GroundRobotPosition> : PacketTraitsBase<PacketTraits<GroundRobotPosition>>
@@ -28,4 +29,5 @@ struct RPL::Meta::PacketTraits<GroundRobotPosition> : PacketTraitsBase<PacketTra
     static constexpr uint16_t cmd = 0x020B;
     static constexpr size_t size = sizeof(GroundRobotPosition);
 };
+#pragma pack(pop)
 #endif // RPL_GROUNDROBOTPOSITION_HPP

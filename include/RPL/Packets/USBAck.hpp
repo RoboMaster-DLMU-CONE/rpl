@@ -3,11 +3,12 @@
 
 #include "RPL/Meta/PacketTraits.hpp"
 #include <cstdint>
+#pragma pack(push, 1)
 
 struct USBAck {
   uint8_t req_id;
   uint8_t status;
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<USBAck>
@@ -19,4 +20,5 @@ struct RPL::Meta::PacketTraits<USBAck>
   using Protocol = USBAckProto;
 };
 
+#pragma pack(pop)
 #endif // RPL_USB_ACK_HPP

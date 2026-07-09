@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 客户端绘制字符图形 (子协议)
@@ -12,7 +13,7 @@ struct InteractionString
 {
     std::array<uint8_t, 15> graphic_data; ///< 图形配置数据 (同 InteractionFigure 结构)
     std::array<uint8_t, 30> data; ///< 字符串内容
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<InteractionString> : PacketTraitsBase<PacketTraits<InteractionString>>
@@ -20,4 +21,5 @@ struct RPL::Meta::PacketTraits<InteractionString> : PacketTraitsBase<PacketTrait
     static constexpr uint16_t cmd = 0x0110;
     static constexpr size_t size = sizeof(InteractionString);
 };
+#pragma pack(pop)
 #endif // RPL_INTERACTIONSTRING_HPP

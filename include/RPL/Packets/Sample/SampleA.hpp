@@ -3,8 +3,9 @@
 
 #include <cstdint>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
-struct __attribute__((packed)) SampleA
+struct SampleA
 {
     uint8_t a;
     int16_t b;
@@ -19,4 +20,5 @@ struct RPL::Meta::PacketTraits<SampleA> : PacketTraitsBase<PacketTraits<SampleA>
     static constexpr size_t size = sizeof(SampleA);
 };
 
+#pragma pack(pop)
 #endif //RPL_SAMPLEPACKET_HPP

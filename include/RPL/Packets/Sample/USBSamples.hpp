@@ -3,12 +3,13 @@
 
 #include "RPL/Meta/PacketTraits.hpp"
 #include <cstdint>
+#pragma pack(push, 1)
 
 struct SensorData {
   float accel_x;
   float accel_y;
   float accel_z;
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<SensorData>
@@ -22,7 +23,7 @@ struct MotorSpeedCmd {
   uint8_t req_id;
   uint8_t motor_id;
   int16_t speed;
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<MotorSpeedCmd>
@@ -37,7 +38,7 @@ struct LEDCmd {
   uint8_t req_id;
   uint8_t led_id;
   uint8_t brightness;
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<LEDCmd>
@@ -48,4 +49,5 @@ struct RPL::Meta::PacketTraits<LEDCmd>
   using Protocol = USBRequestProto;
 };
 
+#pragma pack(pop)
 #endif // RPL_USB_SAMPLES_HPP

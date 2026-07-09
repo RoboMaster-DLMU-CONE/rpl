@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 哨兵自主决策信息，1Hz 频率发送
@@ -23,7 +24,7 @@ struct SentryInfo
     uint16_t sentry_posture : 2; ///< 哨兵姿态：1-进攻, 2-防御, 3-移动
     uint16_t energy_activation_status : 1; ///< 能量机关是否可激活
     uint16_t reserved_2 : 1; ///< 保留位
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<SentryInfo> : PacketTraitsBase<PacketTraits<SentryInfo>>
@@ -44,4 +45,5 @@ struct RPL::Meta::PacketTraits<SentryInfo> : PacketTraitsBase<PacketTraits<Sentr
         Field<uint16_t, 1>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_SENTRYINFO_HPP

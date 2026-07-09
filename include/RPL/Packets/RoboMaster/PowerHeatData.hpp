@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 实时底盘缓冲能量和射击热量数据，10Hz 频率发送
@@ -16,7 +17,7 @@ struct PowerHeatData
     uint16_t buffer_energy; ///< 缓冲能量 (J)
     uint16_t shooter_17mm_1_barrel_heat; ///< 第1个17mm发射机构的射击热量
     uint16_t shooter_42mm_barrel_heat; ///< 42mm发射机构的射击热量
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<PowerHeatData> : PacketTraitsBase<PacketTraits<PowerHeatData>>
@@ -24,4 +25,5 @@ struct RPL::Meta::PacketTraits<PowerHeatData> : PacketTraitsBase<PacketTraits<Po
     static constexpr uint16_t cmd = 0x0202;
     static constexpr size_t size = sizeof(PowerHeatData);
 };
+#pragma pack(pop)
 #endif // RPL_POWERHEATDATA_HPP

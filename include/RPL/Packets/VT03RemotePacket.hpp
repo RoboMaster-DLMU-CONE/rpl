@@ -1,5 +1,6 @@
 #ifndef RPL_PACKETS_VT03_REMOTE_PACKET_HPP
 #define RPL_PACKETS_VT03_REMOTE_PACKET_HPP
+#pragma pack(push, 1)
 
 #ifdef __cplusplus
 #include "RPL/Meta/BitstreamTraits.hpp"
@@ -92,7 +93,7 @@ struct VT03RemotePacket {
   uint16_t key_c : 1;     ///< bit 13
   uint16_t key_v : 1;     ///< bit 14
   uint16_t key_b : 1;     ///< bit 15
-} __attribute__((packed));
+};
 
 #ifdef __cplusplus
 template <>
@@ -126,4 +127,5 @@ struct RPL::Meta::PacketTraits<VT03RemotePacket> : PacketTraitsBase<PacketTraits
 };
 #endif // __cplusplus
 
+#pragma pack(pop)
 #endif // RPL_PACKETS_VT03_REMOTE_PACKET_HPP

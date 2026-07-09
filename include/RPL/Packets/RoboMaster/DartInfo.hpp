@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 飞镖发射相关数据，1Hz 频率发送
@@ -17,7 +18,7 @@ struct DartInfo
     uint16_t target_hit_count : 3; ///< bit 3-5: 对方最近被击中目标累计次数
     uint16_t selected_target : 2; ///< bit 6-7: 飞镖此时选定的击打目标
     uint16_t reserved : 8; ///< bit 8-15: 保留
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<DartInfo> : PacketTraitsBase<PacketTraits<DartInfo>>
@@ -32,4 +33,5 @@ struct RPL::Meta::PacketTraits<DartInfo> : PacketTraitsBase<PacketTraits<DartInf
         Field<uint16_t, 8>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_DARTINFO_HPP

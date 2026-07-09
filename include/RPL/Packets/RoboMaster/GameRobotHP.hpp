@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 机器人血量数据，3Hz 频率发送
@@ -18,7 +19,7 @@ struct GameRobotHP
     uint16_t ally_7_robot_hp; ///< 己方 7 号哨兵机器人血量
     uint16_t ally_outpost_hp; ///< 己方前哨站血量
     uint16_t ally_base_hp; ///< 己方基地血量
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<GameRobotHP> : PacketTraitsBase<PacketTraits<GameRobotHP>>
@@ -26,4 +27,5 @@ struct RPL::Meta::PacketTraits<GameRobotHP> : PacketTraitsBase<PacketTraits<Game
     static constexpr uint16_t cmd = 0x0003;
     static constexpr size_t size = sizeof(GameRobotHP);
 };
+#pragma pack(pop)
 #endif // RPL_GAMEROBOTHP_HPP

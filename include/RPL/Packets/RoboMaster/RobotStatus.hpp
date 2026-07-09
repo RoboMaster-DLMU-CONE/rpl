@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 机器人性能体系数据，10Hz 频率发送
@@ -23,7 +24,7 @@ struct RobotStatus
     uint8_t power_management_chassis_output : 1; ///< Chassis口输出：0-无输出，1-24V输出
     uint8_t power_management_shooter_output : 1; ///< Shooter口输出：0-无输出，1-24V输出
     uint8_t reserved : 5; ///< 保留位
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<RobotStatus> : PacketTraitsBase<PacketTraits<RobotStatus>>
@@ -44,4 +45,5 @@ struct RPL::Meta::PacketTraits<RobotStatus> : PacketTraitsBase<PacketTraits<Robo
         Field<uint8_t, 5>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_ROBOTSTATUS_HPP

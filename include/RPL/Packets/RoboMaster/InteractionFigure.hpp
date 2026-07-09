@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 客户端绘制一个图形 (子协议)
@@ -25,7 +26,7 @@ struct InteractionFigure
     uint32_t details_c : 10; ///< 浮点/半径等
     uint32_t details_d : 11; ///< 终点 X 等
     uint32_t details_e : 11; ///< 终点 Y 等
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<InteractionFigure> : PacketTraitsBase<PacketTraits<InteractionFigure>>
@@ -48,4 +49,5 @@ struct RPL::Meta::PacketTraits<InteractionFigure> : PacketTraitsBase<PacketTrait
         Field<uint32_t, 11>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_INTERACTIONFIGURE_HPP

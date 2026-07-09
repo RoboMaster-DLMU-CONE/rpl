@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 键鼠遥控数据，30Hz 频率发送
@@ -17,7 +18,7 @@ struct RemoteControl
     uint8_t right_button_down; ///< 鼠标右键按下 (1=按下)
     uint16_t keyboard_value; ///< 键盘按键掩码
     uint16_t reserved; ///< 保留位
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<RemoteControl> : PacketTraitsBase<PacketTraits<RemoteControl>>
@@ -25,4 +26,5 @@ struct RPL::Meta::PacketTraits<RemoteControl> : PacketTraitsBase<PacketTraits<Re
     static constexpr uint16_t cmd = 0x0304;
     static constexpr size_t size = sizeof(RemoteControl);
 };
+#pragma pack(pop)
 #endif // RPL_REMOTECONTROL_HPP

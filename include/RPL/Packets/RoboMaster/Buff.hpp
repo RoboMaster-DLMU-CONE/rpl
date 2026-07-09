@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 机器人增益和底盘能量数据，3Hz 频率发送
@@ -16,7 +17,7 @@ struct Buff
     uint8_t vulnerability_buff; ///< 负防御增益 (百分比)
     uint16_t attack_buff; ///< 攻击增益 (百分比)
     uint8_t remaining_energy; ///< 剩余能量值反馈，bit位表示不同阈值
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<Buff> : PacketTraitsBase<PacketTraits<Buff>>
@@ -24,4 +25,5 @@ struct RPL::Meta::PacketTraits<Buff> : PacketTraitsBase<PacketTraits<Buff>>
     static constexpr uint16_t cmd = 0x0204;
     static constexpr size_t size = sizeof(Buff);
 };
+#pragma pack(pop)
 #endif // RPL_BUFF_HPP

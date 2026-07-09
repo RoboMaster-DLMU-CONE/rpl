@@ -6,6 +6,7 @@
 #include <tuple>
 #include <RPL/Meta/BitstreamTraits.hpp>
 #include <RPL/Meta/PacketTraits.hpp>
+#pragma pack(push, 1)
 
 /**
  * @brief 自定义控制器模拟键鼠数据，30Hz 频率上限
@@ -18,7 +19,7 @@ struct CustomClientData
     uint16_t y_position : 12; ///< 鼠标 Y 轴像素位置
     uint16_t mouse_right : 4; ///< 鼠标右键状态
     uint16_t reserved; ///< 保留位
-} __attribute__((packed));
+};
 
 template <>
 struct RPL::Meta::PacketTraits<CustomClientData> : PacketTraitsBase<PacketTraits<CustomClientData>>
@@ -34,4 +35,5 @@ struct RPL::Meta::PacketTraits<CustomClientData> : PacketTraitsBase<PacketTraits
         Field<uint16_t, 16>
     >;
 };
+#pragma pack(pop)
 #endif // RPL_CUSTOMCLIENTDATA_HPP
