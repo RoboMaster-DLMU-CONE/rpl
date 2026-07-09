@@ -19,6 +19,7 @@ struct PacketTraits<SensorData>
   static constexpr size_t size = sizeof(SensorData);
   using Protocol = USBBaseProto;
 };
+} // namespace RPL::Meta
 
 struct MotorSpeedCmd {
   uint8_t req_id;
@@ -26,6 +27,7 @@ struct MotorSpeedCmd {
   int16_t speed;
 };
 
+namespace RPL::Meta {
 template <>
 struct PacketTraits<MotorSpeedCmd>
     : PacketTraitsBase<PacketTraits<MotorSpeedCmd>> {
@@ -34,6 +36,7 @@ struct PacketTraits<MotorSpeedCmd>
   static constexpr PacketCategory category = PacketCategory::Request;
   using Protocol = USBRequestProto;
 };
+} // namespace RPL::Meta
 
 struct LEDCmd {
   uint8_t req_id;
@@ -41,6 +44,7 @@ struct LEDCmd {
   uint8_t brightness;
 };
 
+namespace RPL::Meta {
 template <>
 struct PacketTraits<LEDCmd>
     : PacketTraitsBase<PacketTraits<LEDCmd>> {

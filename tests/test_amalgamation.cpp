@@ -9,7 +9,7 @@ struct SamplePacket {
 
 // Define PacketTraits for SamplePacket
 namespace RPL::Meta {
-template <> struct PacketTraits<SamplePacket> : PacketTraitsBase<SamplePacket> {
+template <> struct PacketTraits<SamplePacket> : PacketTraitsBase<PacketTraits<SamplePacket>> {
     static constexpr uint16_t cmd = 0x01;
     static constexpr size_t size = sizeof(SamplePacket);
     static constexpr bool is_fixed_size = true;

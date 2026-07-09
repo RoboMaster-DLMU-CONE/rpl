@@ -117,7 +117,7 @@ struct DefaultProtocol {
 struct USBBaseProto {
   static constexpr uint8_t start_byte = 0xA5;
   static constexpr bool has_second_byte = false;
-  static constexpr size_t header_size = 4;
+  static constexpr size_t header_size = 5;
   static constexpr size_t tail_size = 0;
 
   static constexpr bool has_header_crc = false;
@@ -131,7 +131,7 @@ struct USBBaseProto {
 
   static constexpr bool has_cmd_field = true;
   static constexpr size_t cmd_offset = 3;
-  static constexpr size_t cmd_field_bytes = 1;
+  static constexpr size_t cmd_field_bytes = 2;
 };
 
 using USBRequestProto = USBBaseProto;

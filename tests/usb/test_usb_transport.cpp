@@ -27,10 +27,15 @@ static void loopback_send(const uint8_t *buf, size_t len) {
   if (!g_tp || len < 4)
     return;
 
-  uint8_t cmd = buf[3];
+  uint16_t cmd;
+  std::memcpy(&cmd, buf + 3, 2);
 
   if (cmd == 0x10 || cmd == 0x11) {
-    uint8_t req_id = buf[4];
+    // Echo request frame back first so request data is written to pool
+    auto r3 = g_tp->receive(buf, len);
+    (void)r3;
+
+    uint8_t req_id = buf[5];
     USBAck ack{req_id, 0};
     constexpr size_t ack_sz =
         RPL::Serializer<USBAck, SensorData, MotorSpeedCmd,
@@ -192,7 +197,7 @@ void test_no_crc_on_wire() {
   auto result = serializer.serialize(buf, frame_sz, sensor);
   assert(result.has_value());
 
-  constexpr size_t expected_size = 4 + sizeof(SensorData);
+  constexpr size_t expected_size = 5 + sizeof(SensorData);
   assert(*result == expected_size);
 
   assert(buf[0] == 0xA5);
@@ -201,7 +206,9 @@ void test_no_crc_on_wire() {
   std::memcpy(&wire_len, buf + 1, 2);
   assert(wire_len == sizeof(SensorData));
 
-  assert(buf[3] == RPL::Meta::PacketTraits<SensorData>::cmd);
+  uint16_t wire_cmd;
+  std::memcpy(&wire_cmd, buf + 3, 2);
+  assert(wire_cmd == RPL::Meta::PacketTraits<SensorData>::cmd);
 
   auto push_result = parser.push_data(buf, *result);
   assert(push_result.has_value());

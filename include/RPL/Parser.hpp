@@ -631,6 +631,8 @@ private:
       }
       if constexpr (P::cmd_field_bytes == 2) {
         std::memcpy(&cmd_id, header_ptr + P::cmd_offset, 2);
+      } else {
+        cmd_id = header_ptr[P::cmd_offset];
       }
       if (data_len > max_frame_size - P::header_size - P::tail_size)
         return ParseResult::Failure;

@@ -45,11 +45,12 @@ public:
   bool has_send() const { return has_send_; }
 
   tl::expected<void, Error> receive(const uint8_t *buf, size_t len) {
-    if (len >= 5) {
-      uint8_t cmd = buf[3];
-      if (cmd == Meta::PacketTraits<USBAck>::cmd && len >= 6) {
-        uint8_t req_id = buf[4];
-        uint8_t status = buf[5];
+    if (len >= 7) {
+      uint16_t cmd;
+      std::memcpy(&cmd, buf + 3, 2);
+      if (cmd == Meta::PacketTraits<USBAck>::cmd) {
+        uint8_t req_id = buf[5];
+        uint8_t status = buf[6];
         ack_mgr_.resolve(req_id, status);
       }
     }

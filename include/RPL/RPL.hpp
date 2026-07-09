@@ -92,12 +92,12 @@ namespace crc_utils
     template <typename out_t, out_t poly, bool refl_in, bool refl_out, size_t size, size_t... indexes>
     struct crc_lookup_table<out_t, poly, refl_in, refl_out, size, std::index_sequence<indexes...>>
     {
-        __attribute__((used, retain)) static constexpr out_t value[size] = {get_crc_table_value_at_index<out_t, poly, refl_in, refl_out, indexes>()...};
+        static constexpr out_t value[size] = {get_crc_table_value_at_index<out_t, poly, refl_in, refl_out, indexes>()...};
     };
 
 #if ((defined(_MSVC_LANG) && _MSVC_LANG < 201703L) || (defined(__cplusplus) && __cplusplus < 201703L)) // redeclaration is only needed before C++17
     template <typename out_t, out_t poly, bool refl_in, bool refl_out, size_t size, size_t... indexes>
-    constexpr std::array<out_t, size> crc_lookup_table<out_t, poly, refl_in, refl_out, size, std::index_sequence<indexes...>>::value;
+    constexpr out_t crc_lookup_table<out_t, poly, refl_in, refl_out, size, std::index_sequence<indexes...>>::value[size];
 #endif
 
     template <typename out_t, out_t poly, bool refl_in, bool refl_out, out_t x_or_out, typename std::enable_if<refl_in, int *>::type = nullptr>
@@ -220,6 +220,13 @@ using ProtocolCRC8 = crc_utils::crc<uint8_t, 0x31, 0xFF, true, true, 0x00>;
 /// CRC16: CRC-16/MCRF4XX, poly=0x1021, init=0xFFFF, 输入/输出反射 —
 /// 与裁判系统协议一致
 using ProtocolCRC16 = CRC16::MCRF4XX;
+
+struct NoopCRC {
+  using type = uint16_t;
+  static constexpr uint16_t calc(const uint8_t *, size_t, uint16_t = 0) {
+    return 0;
+  }
+};
 
 } // namespace RPL
 
@@ -401,6 +408,13 @@ concept HasBitLayout = requires {
  */
 
 namespace RPL::Meta {
+
+enum class PacketCategory : uint8_t {
+  Notification,
+  Request,
+  Ack,
+};
+
 /**
  * @brief 默认 RoboMaster 协议定义
  *
@@ -482,6 +496,29 @@ struct DefaultProtocol {
   static constexpr size_t cmd_field_bytes = 2; ///< 命令码字段占用的字节数
 };
 
+struct USBBaseProto {
+  static constexpr uint8_t start_byte = 0xA5;
+  static constexpr bool has_second_byte = false;
+  static constexpr size_t header_size = 5;
+  static constexpr size_t tail_size = 0;
+
+  static constexpr bool has_header_crc = false;
+  using RPL_CRC = RPL::NoopCRC;
+
+  static constexpr bool has_seq_field = false;
+
+  static constexpr bool has_length_field = true;
+  static constexpr size_t length_offset = 1;
+  static constexpr size_t length_field_bytes = 2;
+
+  static constexpr bool has_cmd_field = true;
+  static constexpr size_t cmd_offset = 3;
+  static constexpr size_t cmd_field_bytes = 2;
+};
+
+using USBRequestProto = USBBaseProto;
+using USBAckProto = USBBaseProto;
+
 /**
  * @brief 数据包特性基类
  *
@@ -512,6 +549,9 @@ template <typename Derived> struct PacketTraitsBase {
 
   /// @brief 默认使用 RoboMaster 协议，派生类可通过 `using Protocol = MyProtocol;` 覆盖
   using Protocol = DefaultProtocol;
+
+  /// @brief 包分类：Notification（单向通知）、Request（期望 Ack）、Ack（确认包）
+  static constexpr PacketCategory category = PacketCategory::Notification;
 
   /// @brief 是否跳过写入 Deserializer 的 MemoryPool（默认 false）
   /// @note 若设为 true，Parser 解析成功后不会将该包拷贝到 MemoryPool，
@@ -2113,10 +2153,10 @@ concept Deserializable = (std::is_same_v<T, Ts> || ...);
  * @par 使用示例
  * @code
  * RPL::Deserializer<PacketA, PacketB> deserializer;
- * 
+ *
  * // Parser 内部调用 write() 写入数据
  * deserializer.write(PacketA::cmd, data_ptr, sizeof(PacketA));
- * 
+ *
  * // 用户获取数据包
  * auto packet_a = deserializer.get<PacketA>();
  * @endcode
@@ -2288,6 +2328,17 @@ public:
         pool.buffer[Collector::template type_index<T>()]);
   };
 
+  template <typename T>
+    requires Deserializable<T, Ts...>
+  uint32_t version() const noexcept {
+    constexpr auto seq_idx = Collector::template type_seq_index<T>();
+#ifdef RPL_USE_STD_ATOMIC
+    return versions_[seq_idx].load(std::memory_order_acquire);
+#else
+    return versions_[seq_idx];
+#endif
+  }
+
   /**
    * @brief 获取指定命令码的写入指针
    *
@@ -2298,7 +2349,8 @@ public:
    * @warning 此方法不提供 SeqLock 保护，存在竞态风险
    */
   [[deprecated("Use write() for SeqLock-protected writes")]]
-  [[nodiscard]] constexpr uint8_t *getWritePtr(uint16_t cmd) noexcept {
+  [[nodiscard]] constexpr uint8_t *
+  getWritePtr(uint16_t cmd) noexcept {
     const auto index = Collector::cmd_index(cmd);
     if (index == static_cast<size_t>(-1))
       return nullptr;
@@ -2592,6 +2644,8 @@ namespace RPL
         BufferOverflow,   ///< 缓冲区溢出
         InternalError,    ///< 内部错误
         InvalidCommand,   ///< 无效命令
+        Timeout,          ///< 超时（Ack 超时）
+        AckMismatch,      ///< Ack 匹配失败
     };
 
     /**
@@ -5228,16 +5282,16 @@ public:
       }
 
       // 帧尾 (CRC)
-      // 使用协议特定的 CRC 算法
-      using FrameCRC = typename Protocol::RPL_CRC;
-      const uint16_t frame_crc16 =
-          FrameCRC::calc(current_buffer, Protocol::header_size + data_size);
+      if constexpr (Protocol::tail_size > 0) {
+        using FrameCRC = typename Protocol::RPL_CRC;
+        const uint16_t frame_crc16 =
+            FrameCRC::calc(current_buffer, Protocol::header_size + data_size);
 
-      // CRC16 采用小端格式
-      current_buffer[Protocol::header_size + data_size] =
-          static_cast<uint8_t>(frame_crc16 & 0xFF);
-      current_buffer[Protocol::header_size + data_size + 1] =
-          static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
+        current_buffer[Protocol::header_size + data_size] =
+            static_cast<uint8_t>(frame_crc16 & 0xFF);
+        current_buffer[Protocol::header_size + data_size + 1] =
+            static_cast<uint8_t>((frame_crc16 >> 8) & 0xFF);
+      }
 
       offset += current_frame_size;
     };
@@ -6298,25 +6352,27 @@ template <typename... Args> class Parser {
     static constexpr size_t buffer_size = calculate_buffer_size();
 
     // --- 构建查找表 ---
+    template <typename W>
+    static constexpr void register_packet(std::array<uint8_t, 256>& table,
+                                          size_t index) {
+      uint8_t sb = W::Protocol::start_byte;
+      if (table[sb] != 0xFF && table[sb] != index) {
+        RPL_ERROR_START_BYTE_COLLISION();
+      }
+      table[sb] = static_cast<uint8_t>(index);
+    }
+
+    template <typename... Ws>
+    static constexpr void build_header_impl(
+        std::array<uint8_t, 256>& table, Details::TypeList<Ws...>) {
+      size_t idx = 0;
+      ((register_packet<Ws>(table, idx++)), ...);
+    }
+
     static constexpr auto header_lut = []() {
       std::array<uint8_t, 256> table;
       table.fill(0xFF);
-
-      auto register_worker = [&table]<typename W>(size_t index) {
-        uint8_t sb = W::Protocol::start_byte;
-        if (table[sb] != 0xFF && table[sb] != index) {
-          RPL_ERROR_START_BYTE_COLLISION();
-        }
-        table[sb] = static_cast<uint8_t>(index);
-      };
-
-      auto helper =
-          [&register_worker]<typename... Ws>(Details::TypeList<Ws...>) {
-            size_t idx = 0;
-            ((register_worker.template operator()<Ws>(idx++)), ...);
-          };
-      helper(UniqueWorkers{});
-
+      build_header_impl(table, UniqueWorkers{});
       return table;
     }();
 
@@ -6610,6 +6666,8 @@ private:
       }
       if constexpr (P::cmd_field_bytes == 2) {
         std::memcpy(&cmd_id, header_ptr + P::cmd_offset, 2);
+      } else {
+        cmd_id = header_ptr[P::cmd_offset];
       }
       if (data_len > max_frame_size - P::header_size - P::tail_size)
         return ParseResult::Failure;
@@ -6619,33 +6677,33 @@ private:
     if (buffer.available() < total_len)
       return ParseResult::Incomplete;
 
-    // 获取分段读视图，进行分段 CRC 校验
+    // 获取分段读视图
     auto [s1, s2] = buffer.get_read_spans(0, total_len);
 
-    size_t calc_len = total_len - P::tail_size;
-    uint16_t calc_crc = 0;
+    if constexpr (P::tail_size > 0) {
+      size_t calc_len = total_len - P::tail_size;
+      uint16_t calc_crc = 0;
 
-    if (calc_len <= s1.size()) {
-      calc_crc = P::RPL_CRC::calc(s1.data(), calc_len);
-    } else {
-      calc_crc = P::RPL_CRC::calc(s1.data(), s1.size());
-      calc_crc = P::RPL_CRC::calc(s2.data(), calc_len - s1.size(), calc_crc);
+      if (calc_len <= s1.size()) {
+        calc_crc = P::RPL_CRC::calc(s1.data(), calc_len);
+      } else {
+        calc_crc = P::RPL_CRC::calc(s1.data(), s1.size());
+        calc_crc = P::RPL_CRC::calc(s2.data(), calc_len - s1.size(), calc_crc);
+      }
+
+      uint16_t recv_crc = 0;
+      if (calc_len + 2 <= s1.size()) {
+        std::memcpy(&recv_crc, s1.data() + calc_len, 2);
+      } else if (calc_len >= s1.size()) {
+        std::memcpy(&recv_crc, s2.data() + (calc_len - s1.size()), 2);
+      } else {
+        recv_crc =
+            s1.data()[calc_len] | (static_cast<uint16_t>(s2.data()[0]) << 8);
+      }
+
+      if (calc_crc != recv_crc)
+        return ParseResult::Failure;
     }
-
-    // 验证接收到的 CRC
-    uint16_t recv_crc = 0;
-    if (calc_len + 2 <= s1.size()) {
-      std::memcpy(&recv_crc, s1.data() + calc_len, 2);
-    } else if (calc_len >= s1.size()) {
-      std::memcpy(&recv_crc, s2.data() + (calc_len - s1.size()), 2);
-    } else {
-      // CRC 跨越了 A/B 边界
-      recv_crc =
-          s1.data()[calc_len] | (static_cast<uint16_t>(s2.data()[0]) << 8);
-    }
-
-    if (calc_crc != recv_crc)
-      return ParseResult::Failure;
 
     // 反序列化 (分段拷贝)
     std::span<const uint8_t> payload_s1, payload_s2;
