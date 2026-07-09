@@ -56,10 +56,10 @@ concept Deserializable = (std::is_same_v<T, Ts> || ...);
  * @par 使用示例
  * @code
  * RPL::Deserializer<PacketA, PacketB> deserializer;
- * 
+ *
  * // Parser 内部调用 write() 写入数据
  * deserializer.write(PacketA::cmd, data_ptr, sizeof(PacketA));
- * 
+ *
  * // 用户获取数据包
  * auto packet_a = deserializer.get<PacketA>();
  * @endcode
@@ -231,6 +231,17 @@ public:
         pool.buffer[Collector::template type_index<T>()]);
   };
 
+  template <typename T>
+    requires Deserializable<T, Ts...>
+  uint32_t version() const noexcept {
+    constexpr auto seq_idx = Collector::template type_seq_index<T>();
+#ifdef RPL_USE_STD_ATOMIC
+    return versions_[seq_idx].load(std::memory_order_acquire);
+#else
+    return versions_[seq_idx];
+#endif
+  }
+
   /**
    * @brief 获取指定命令码的写入指针
    *
@@ -241,7 +252,8 @@ public:
    * @warning 此方法不提供 SeqLock 保护，存在竞态风险
    */
   [[deprecated("Use write() for SeqLock-protected writes")]]
-  [[nodiscard]] constexpr uint8_t *getWritePtr(uint16_t cmd) noexcept {
+  [[nodiscard]] constexpr uint8_t *
+  getWritePtr(uint16_t cmd) noexcept {
     const auto index = Collector::cmd_index(cmd);
     if (index == static_cast<size_t>(-1))
       return nullptr;
